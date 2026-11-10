@@ -2,6 +2,7 @@
 
 | 何時讀 | 入口 |
 | --- | --- |
+| 接手本次 recall 整合，確認成果、遺留與第一步操作 | [本次交接](HANDOFF.md) |
 | 收尾工作、整理成果與遺留，讓人類能直接接手 | [recall 工作交接](skills/recall/SKILL.md) |
 
 Rust 多工作樹共用編譯快取：見 [cargo-cache 技能](skills/cargo-cache/SKILL.md)。
