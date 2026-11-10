@@ -204,6 +204,42 @@ def checkpoint_evidence_kind(text):
     return False
 
 
+def checkpoint_done_checks(text):
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    groups, current = [], []
+    for token in tokens:
+        if token and all(char in ";&|\n" for char in token):
+            groups.append(current)
+            current = []
+        else:
+            current.append(token)
+    groups.append(current)
+    for group in groups:
+        words = unwrap(group)
+        if words and os.path.basename(words[0]) in ("python", "python3"):
+            words = words[1:]
+        if not words or os.path.basename(words[0]) not in ("cash-rule-checkpoint", "cash_rule_checkpoint.py"):
+            continue
+        options = []
+        for index, word in enumerate(words[1:], 1):
+            option, separator, value = word.partition("=")
+            if not separator:
+                value = words[index + 1] if index + 1 < len(words) else ""
+            options.append((option, value))
+        if ("--step-state", "DONE") in options and any(
+            option == "--check" and value.rpartition("=")[2] not in ("pass", "not_applicable")
+            for option, value in options
+        ):
+            return True
+    return False
+
+
 def markdown_registered_prose(tool_input):
     """Only observed phrases in newly written Markdown prose, not code or old diff lines."""
     pattern = re.compile(r"\u5404\u7ec4|\u5206\u522b|\u6307\u6570\u5206\u5e03|\u4fdd\u5b58\u8be5|\u5ba3\u79f0|\u786e\u8ba4|\u53cc\u7ad9")
@@ -1004,6 +1040,14 @@ def verdict(payload):
         return "kratos-schema-default", "專案沒有註冊default身分格式，請從Kratos設定讀取實際schema_id，再建立測試帳號。"
     if is_shell:
         text = command_text(payload)
+        if text.lstrip().startswith(("/home/cash/tools/cash-rule-checkpoint", "~/tools/cash-rule-checkpoint", "cash-rule-checkpoint")):
+            try:
+                next_ticket = subprocess.run(["node", os.path.expanduser("~/.agents/guards/rag_next_ticket_guard.mjs")], input=json.dumps({"argv": shlex.split(text), "cwd": str(schema_base)}), text=True, capture_output=True, timeout=2)
+                next_ticket_error = json.loads(next_ticket.stdout).get("reason") if next_ticket.returncode == 0 else None
+                if next_ticket_error:
+                    return "rag-next-ticket", next_ticket_error
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
         from pos_provider_mock_guard import problem as provider_mock_problem
         mock_error = provider_mock_problem(text, schema_base)
         if mock_error:
@@ -1026,6 +1070,14 @@ def verdict(payload):
         if missing_git_source_path(text, schema_base):
             return "git-source-path", "該Git版本沒有這個路徑，請先列出版本內檔案並核對工作目錄，勿猜路徑。"
         from shell_read_path_guard import missing_shell_read, other_worktree_hits
+        from node_stdin_guard import problem as node_stdin_problem
+        node_error = node_stdin_problem(text)
+        if node_error:
+            return "node-ambiguous-stdin", node_error
+        from ollama_slot_shape_guard import runtime_problem as slot_runtime_problem
+        slot_runtime_error = slot_runtime_problem(text, schema_base)
+        if slot_runtime_error:
+            return "ollama-slot-shape", slot_runtime_error
         missing = missing_shell_read(text, schema_base)
         if missing:
             hits = other_worktree_hits(missing, schema_base)
@@ -1053,6 +1105,8 @@ def verdict(payload):
             return "checkpoint-write", CHECKPOINT_MSG
         if checkpoint_evidence_kind(text):
             return "checkpoint-evidence-kind", "進度證據種類不合法；使用git、file、symbol、test、command、screen、service、model_opinion或other，格式為種類=位置。"
+        if checkpoint_done_checks(text):
+            return "checkpoint-done-checks", "完成的步驟只能列已通過或不適用的檢查；未跑項目請保留在未證實範圍，不要標成已通過。"
         if checkpoint_prose(text):
             return "checkpoint-prose", PROSE_MSG
         if unchecked_cargo_preflight(text):
@@ -1088,6 +1142,10 @@ def verdict(payload):
     if any(k in tool_input for k in EDIT_KEYS) and any(CHECKPOINT.search(p) for p in edit_targets(tool_input)):
         return "checkpoint-write", CHECKPOINT_MSG
     if any(k in tool_input for k in EDIT_KEYS):
+        from ollama_slot_shape_guard import problem as slot_shape_problem
+        slot_shape_error = slot_shape_problem(tool_input)
+        if slot_shape_error:
+            return "ollama-slot-shape", slot_shape_error
         over = loop_over_limit(tool_input)
         if over:
             return "loop-size", LOOP_MSG.format(limit=LOOP_LIMIT, size=over)

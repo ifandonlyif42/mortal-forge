@@ -43,7 +43,7 @@ PR_API = re.compile(re.escape(REPO) + r"/(?:pulls|issues)/(\d{2,6})(?!\d)")
 GH_PR_CMD = re.compile(r"\bgh\s+pr\s+(?:create|ready|edit|merge|view|comment|close|reopen|checks|diff)\b[^\n;&|]*?\s#?(\d{2,6})(?!\d)")
 HASH_NUM = re.compile(r"(?<![\w/#])#(\d{2,6})(?!\d)")
 LINK_LINE = re.compile(r"(?im)^\W*(?:(?:refs?|closes?|closed|fix(?:es|ed)?|resolves?|resolved)\b|關聯)[^\n]*$")
-LOOP_DOC = re.compile(r"^docs\(loops?\)")
+LOOP_DOC = re.compile(r"^docs\(loops?\)|^docs\([^)]*\):.*loop")
 READY_WORDS = re.compile(r"可以\s*review|可\s*review|請.{0,4}review|要不要合|合進\s*dev|合\s*dev|等你決定|做完")
 
 

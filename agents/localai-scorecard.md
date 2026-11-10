@@ -177,3 +177,14 @@ qwen3.8 系列是會先想很久的那種模型，看來把輸出額度都花在
 | 2026-09-23 | code | qwen3-coder:30b | S25 runner特徵契約審查 | edited | 2 | 提醒feature_names可能影響續跑，但定性成P1過重；主管用s25_runtime與續跑測試複核，保留為線索。9.67秒、2496/98實測token |
 | 2026-09-23 | code | qwen3-coder:30b | POS Windows quick-build diff review | used | 3 | 正確確認 --quick 略過 NSIS 且保留 full path；主管另以 node/YAML 檢查及 Windows runner 驗收 artifact。3.91s，2358/126 實測 token |
 | 2026-09-23 | code | qwen3-coder:30b | POS Rust/Node 通訊計畫審查 | rejected | 1 | 將已列的退出、版本及交易保護誤報遺漏，範例依賴全域 Node；未採用。12.25s，2339/255 實測 tokens；主管以 cmp 及介面核對 |
+
+## 推論引擎量測：Qwen3.8 Flash-Next UD-Q4_K_XL，200K 上下文（Radeon 8060S，128GB）
+
+| 日期 | 引擎 | prefill | decode | 備註 |
+|---|---|---|---|---|
+| 2026-11-01 | llama.cpp b12032 Vulkan（已移除，使用者 2026-11-02 指示不再使用） | 372.7 token/秒 | 20.4 token/秒（100K 深度 23.1） | KV q8_0 |
+| 2026-11-02 | Strata 0.1.55 HIP（halo） | 362.7 token/秒 | 平均 25.3、5 秒窗口峰值 27.0 token/秒 | KV int8；有 MTP 草稿（接受 43/64），非同條件；每種 1 次 |
+
+- Strata 200K 需關閉對話快取（`--set conversation-cache-mib=0`）：第一次嘗試引擎被 earlyoom 關掉（可用記憶體 14,660 MiB）。
+- 完整記錄：`~/.local/share/bench-models/strata-results-20261102/REPORT.md`；llama.cpp 原始資料：`~/.local/share/bench-models/flash-next-results-20261101/`。
+- 已停止 Strata 伺服器並釋放記憶體；啟動指令見 REPORT.md 設定表。

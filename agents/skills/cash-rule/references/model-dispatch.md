@@ -4,7 +4,7 @@
 
 只在主機 Essence 適用，這台電腦上所有 repo 都要遵守。
 
-- 監督者（雲端模型）拆題、派本機模型執行（讀檔、搜尋歸納、寫程式、改文件、審查、測試分析）、監督者驗收與最終判斷。入口 `localai code|review|second`；先查 `python3 ~/tools/ollama_management/status.py`，不繞過 `ollama-memory-gate` 與 CPU／記憶體上限。
+- 監督者（雲端模型）拆題、派本機模型執行（讀檔、搜尋歸納、寫程式、改文件、審查、測試分析）、監督者驗收與最終判斷。入口 `localai code|review|second`，每次必須附 `--why "一句白話：哪個任務、哪個 repo、為了什麼"`，缺少會被拒絕；並附 2 到 5 個 `--check "可用是或否驗證的檢查項"`；收到答案、驗完後執行 `localai grade <run_id> --met N --total M` 評成完成／做到一半／失敗；使用者問本機模型在做什麼時，執行 `localai now` 回報（使用者 2026-11-06 定；依據與回顧方式見 `~/.agents/evidence/localai-grading-20261106/README.md`）；先查 `python3 ~/tools/ollama_management/status.py`，不繞過 `ollama-memory-gate` 與 CPU／記憶體上限。
 - 模型輸出是待驗證線索；金額、權限、刪除、部署由監督者用工具輸出驗證。逾時或失敗先查原因，不盲重送。
 - 降級（使用者 2026-10-01 定）：確定性工具能機械回答的直接用工具。本機服務不可用時續做已授權的只讀工作；寫入工作有任務層授權才改派雲端，否則標 `BLOCKED` 回報；不自行重啟、卸載或繞過共用服務。
 - 犯過的錯寫 `~/.agents/lessons.md`；可重用程式做成 SKILL＋MCP 放 mortal-mcp 並登記 `~/tools/tools.json`。

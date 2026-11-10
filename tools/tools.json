@@ -1,5 +1,16 @@
 [
   {
+    "name": "process-memory-top20",
+    "purpose": "列出目前實體記憶體占用最高的 20 個程序",
+    "location": "PATH:ps",
+    "usage": "ps -eo pid,rss,comm --sort=-rss | head -21",
+    "input": "本機目前的程序",
+    "output": "程序編號、實體記憶體 KiB、程序名稱；由大到小排列",
+    "dependencies": "procps 的 ps、head",
+    "risk": "唯讀；共用記憶體可能重複計入各程序，不可直接相加；不輸出完整命令以避免洩露參數",
+    "verification": "2026-11-02 實機執行，確認表頭及 20 個程序按 RSS 遞減"
+  },
+  {
     "name": "helios-broker-contract-tests",
     "purpose": "驗證 Helios 共用券商請求、帳戶隔離、能力判定及非法輸入拒絕",
     "location": "/home/cash/orca/workspaces/Helios/以真理之名/tests/broker_contract/test_contracts.py",
@@ -901,5 +912,16 @@
     "dependencies": "bash、rsync",
     "risk": "套用會覆蓋同名設定，舊檔先備份到 ~/.desktop-setup-backup-時間；不含金鑰與圖示主題",
     "verification": "2026-11-01：暫存家目錄預覽 0 檔、套用 1114 檔，.config 比對一致；未在真實新電腦測試"
+  },
+  {
+    "name": "taobao",
+    "purpose": "淘寶天貓京東單一讀取入口：沿用原 Playwright 登入，整合商品、搜尋結果、評價與分類圖片分頁",
+    "location": "/home/cash/.agents/skills/taobao/scripts/read-marketplace.js",
+    "usage": "依 skills/taobao/SKILL.md 先在原瀏覽器開頁，再將整合器完整內容傳給 Playwright browser_run_code_unsafe(code=...)；不另啟動兩套上游 server",
+    "input": "商品網址、款式與使用者需求",
+    "output": "來源可核對的商品資訊；分開登入狀態、工具故障與未驗證規格",
+    "dependencies": "現有 Playwright MCP 或已安裝的淘寶 MCP；不新增瀏覽器服務",
+    "risk": "唯讀商品；不輸出 Cookie、不購買、不加購、不發訊息",
+    "verification": "2026-11-05：3項Node負向測試、15項本機攔截真DOM檢查通過；移除帳戶確認的變異版本被測試抓出；原淘寶登入兩商品讀回所選款式、14599/15999及一年保固；京東只驗本機資料；四個技能入口同版安裝與逐檔讀回通過"
   }
 ]

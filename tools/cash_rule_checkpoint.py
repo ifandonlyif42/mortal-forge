@@ -133,6 +133,9 @@ def build(args, prev: dict | None, prev_step_state: str | None = None) -> dict:
         extra["acceptance"] = args.acceptance
     if stop_proof(args):
         extra["stop_proof"] = stop_proof(args)
+    if args.decision == "replan":
+        extra["replan"] = {"trigger": args.replan_trigger, "kept": args.replan_kept,
+                           "cancelled_or_deferred": args.replan_deferred, "new_order": args.replan_order}
     if args.decision == "wait":
         extra["blockers"] = [f"wait_on: {args.wait_on}"] + [f"tried: {t}" for t in args.wait_tried]
     return extra | {
@@ -180,6 +183,10 @@ def main() -> int:
     ap.add_argument("--stop-shrunk", default="", help="smallest version tried and its result")
     ap.add_argument("--stop-searched", action="append", default=[], help="existing source checked")
     ap.add_argument("--stop-reviewer", default="", help="adversarial review result and where it is")
+    ap.add_argument("--replan-trigger", default="", help="decision replan: why the plan changed")
+    ap.add_argument("--replan-kept", action="append", default=[], help="decision replan: kept item")
+    ap.add_argument("--replan-deferred", action="append", default=[], help="decision replan: cancelled or deferred item")
+    ap.add_argument("--replan-order", action="append", default=[], help="decision replan: new order item")
     ap.add_argument("--wait-on", default="", help="decision wait: who or what is awaited")
     ap.add_argument("--wait-tried", action="append", default=[], help="decision wait: alternative=>result")
     args = ap.parse_args()

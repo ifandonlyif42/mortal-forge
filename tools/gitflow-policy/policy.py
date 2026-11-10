@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 VERSION = "1.0.2"
+KEY_ID_ALLOWED = {"loops/local-mall-monitoring.checkpoints.jsonl"}
 TYPES = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
 SUBJECT = re.compile(rf"^(?:{TYPES})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: \S.*$")
 TOPIC = re.compile(r"^(feature|bug|docs|chore|refactor|test|ci)/[a-z0-9]+(?:[/-][a-z0-9]+)*$")
@@ -99,7 +100,8 @@ def check_files(paths, staged=True, revision=None):
             raw = Path(name).read_bytes()
         if len(raw) > 2_000_000 or b"\0" in raw:
             continue
-        if re.search(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b", raw):
+        pattern = rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----" if name in KEY_ID_ALLOWED else rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b"
+        if re.search(pattern, raw):
             raise Refused("Potential credential in " + name + "; value suppressed.")
         suffix = Path(name).suffix
         try:

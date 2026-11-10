@@ -3951,6 +3951,7 @@
 - 原因：schema `allOf[40]`＋`allOf[42]`：step DONE 要 validation.result=pass，而 pass 只容許 pass／not_applicable 的檢查。validator 結案時要求每個出現過的 step 都是 DONE／SKIPPED／CANCELLED／SUPERSEDED；第 1 筆開了 S01 READY 後就沒再記。
 - 防：沒跑的項目寫在 `--not-proven`，不要當 `--check ...=not_run` 放進 DONE 那筆。結案前先列出每個 step 最後狀態，未結束的先補 RUNNING→VALIDATING→DONE。COMPLETE 那筆不要帶 `--next`。
 - 證據：pos-checkout-font-size 第 9、11 筆首次被拒；補 S01 三筆後「appended iteration 14 (COMPLETE/DONE)」。
+- guard: guards/write_guard.py checkpoint-done-checks，攔截DONE步驟帶not_run或fail；未驗範圍仍明列not-proven。2026-11-09於客服T65再次遇到，已加機械檢查。
 
 ## 2026-10-15 前端測試直接塞登入資料，沒發現 Rust 那層把新欄位丟掉，v0.1.7、v0.1.8 交出去後照商城算價永遠不會啟用
 - 錯：newretail-pos 新增「商城送 `tillPricing`、畫面依它選算價來源」。我只在畫面端測試用 `setup(..., { ...session, tillPricing: "MALL" })` 塞登入資料，全綠就交付。實際上畫面拿到的登入資料是 Rust `pos_session.rs` 的 `MallPosSession` 序列化出來的，那是固定欄位的 struct，商城多送的 `tillPricing` 在讀進來時就被丟掉。正式商城上線 v1.69.0 後才發現，已經編好、放進隨身碟兩顆。
@@ -4236,7 +4237,7 @@
 ## 2026-10-22 Node 標準輸入同時用 require 與頂層 await 會拒絕判定模組格式
 - 錯：臨時 CDP 擷取腳本同時使用 `require()` 與頂層 `await`，Node 22 回報 `ERR_AMBIGUOUS_MODULE_SYNTAX`。
 - 原因：標準輸入沒有檔案副檔名，CommonJS 與 ES module 語法混用，Node 無法選格式。
-- 防：需要頂層 `await` 的標準輸入腳本固定加 `node --input-type=module` 並使用 `import`。
+- 防：需要頂層 `await` 的標準輸入腳本固定加 `node --input-type=module` 並使用 `import`。guard: `~/.agents/guards/node_stdin_guard.py` 經 `write_guard.py` 的 `node-ambiguous-stdin`，對固定Node heredoc、開頭require及頂層await做不執行內容的語法檢查；async函式與明確module放行，動態或不確定形式不攔。
 - 證據：正式手機 Chrome 首次擷取失敗；改為明確 ES module 後同一擷取成功。
 ## 2026-10-23 Gateway 主機服務引用已刪除的臨時工作樹
 - 錯：Gateway 由主機 systemd 啟動，且啟動前命令指向已刪除的臨時工作樹，重開機後持續啟動失敗，公開入口回 502。
@@ -4401,7 +4402,7 @@
 ## 2026-10-30 常駐服務直接執行 target 目錄裡的程式
 - 錯：aletheia-main.service 直接執行 repo 內 target/release/aletheia，清建置檔必須先停服務；服務與開發建置互相綁死。
 - 原因：沒有把服務用的程式安裝到固定位置，就直接指向編譯輸出目錄。
-- 防：systemd 服務、排程、常駐程序的 ExecStart 不得指向任何 target/、build/、tmp/ 路徑；先把發行版程式複製到 ~/.local/lib/<名稱>/ 再啟動。清 target 前先 ps 與 lsof 檢查。
+- 防：systemd 服務、排程、常駐程序的 ExecStart 不得指向任何 target/、build/、tmp/ 路徑；先把發行版程式複製到 ~/.local/lib/<名稱>/ 再啟動。清 target 前先 ps 與 lsof 檢查。 guard: service_path_guard.py 在寫入或修改啟動程式路徑指向編譯輸出目錄時擋下（Claude 的 Bash／Write／Edit，Codex 只擋 Bash）。
 - 證據：使用者 2026-10-30 指示「target 放 server 是錯誤的操作」；已停用並取消開機自啟 aletheia-main.service。
 
 ## 2026-10-30 測試用 Docker 容器與磁碟區沒有回收機制
@@ -4409,3 +4410,682 @@
 - 原因：測試容器沒加 --rm；docker rm 沒加 -v 使 PostgreSQL 匿名磁碟區殘留；沒有到期機制。
 - 防：docker run／create／volume create 必須有 --rm 或 --label expire=（日期或 never）；長期使用的服務標 never 並重用，不反覆刪建（耗損 SSD）。guard: docker_expire_guard.py 擋未標記建立；docker-expire.timer 每天 04:00 回收到期項目。
 - 證據：docker system df 清理前後；~/tools/docker-expire-reaper.py 假資料實測。
+
+## 2026-11-03 本機驗收重複登入觸發限流
+- 錯：POS 畫面驗收每次開新瀏覽器都重新登入測試員工，觸發登入 HTTP 429，後續驗收暫停。
+- 原因：沒有保存並重用登入狀態，忽略登入介面的 15 分鐘限流。
+- 防：測試開始只登入一次並保存隔離的登入狀態；收到 429 停止重試，等待既定時間，不清除或繞過限流。
+- 證據：ai-mall #3601，本機登入 429；限流設定 apps/api/src/modules/auth/auth.routes.ts。
+
+## 2026-11-03 POS 擋單庫存對照查到另一個倉庫
+- 錯：以倉庫庫存總數不變判定收款失敗未扣庫存，但測試門市實際使用的是商品預設庫存。
+- 原因：沒有先確認分店的庫存來源，兩處數量各自獨立。
+- 防：先核對該分店實際扣庫路徑；測試前後同時比對商品預設庫存與相關門市倉庫，不用另一倉的數字代替。
+- 證據：ai-mall #3601，本機商品預設庫存 6、另一倉庫 20，重驗後兩者均不變。
+
+## 2026-11-04 執行中的 Shell 腳本不可插入文字
+- 錯：check.sh all 執行中插入檢查命令，Shell 的讀取位置偏移，出現 cripts/check-selftest.sh 找不到。
+- 原因：Shell 邊執行邊讀取同一個已修改檔案。
+- 防：修改執行中的腳本前先等它結束；檔案完成後再從頭驗收。
+- 證據：/tmp/gateway-codex-check-all-release.log；已保留失敗並重新執行完整檢查。
+
+## 2026-11-04 部署包裝需保留原呼叫參數
+- 錯：替部署命令補資源期限標籤時，run 包裝只接 args，Caddy 驗證傳 input 時出現 TypeError；停在切換前。
+- 原因：包裝未保留原函式的關鍵字參數。
+- 防：先檢查所有呼叫，包裝保留 **kwargs 並轉交；失敗後先核對入口與候選狀態，再從既有候選續接，不能盲重建。
+- 證據：/tmp/gateway-codex-production-deploy.log；/tmp/gateway-codex-production-resume.log。
+
+## 2026-11-04 直接抓網頁失敗不代表原淘寶瀏覽器登出
+- 錯：HTTP 跳登入就宣稱無法沿用原登入，請使用者另貼規格。
+- 原因：混淆不同入口的登入狀態，未重新發現當輪 Playwright 工具，也把空白分頁當作登入遺失。
+- 防：共用 taobao 技能先列原瀏覽器分頁，再於同一瀏覽器開商品確認帳戶與內容；HTTP、其他瀏覽器及服務額度失敗不能替代這一步。
+- 證據：2026-11-04 原 Playwright 在空白分頁開商品仍已登入，讀回兩商品所選價格 14599 與 15999；主規格圖讀到 64GB DDR3 ECC、E5-2686 v4、480GB SSD。
+
+## 2026-11-05 共用 Rust target 的跨工作樹測試不可重疊
+- 錯：completion 的 all 執行時推送主工作樹，pre-push 也編譯並測試，completion 的兩項啟動測試執行了主工作樹產出的同名 Gateway，誤報缺 OPENAI_API_KEY。
+- 原因：Cargo 編譯鎖不涵蓋整套測試執行期間；整合測試的 CARGO_BIN_EXE 指向共用 target 中可被另一分支替換的檔案。
+- 防：一個 repo 的跨工作樹 check、build、push 掛勾全程序列執行；只等編譯鎖不足。不得在測試未結束時啟動另一工作樹的 push。
+- 證據：/tmp/gateway-closeout-completion-check.log 的 capture_startup 2 項失敗；主樹 push 結束後單獨執行同測試 2 項通過，/tmp/gateway-closeout-startup-recheck.log。全套另於 /tmp/gateway-closeout-completion-check-serial.log 重跑。
+
+## 2026-11-05 用東京舊入口誤判台北正式站
+- 錯：查 LINE 服務時先採用舊 README 的東京網址，未讀最新影子模式 LOOP，連線逾時後回報無法確認，漏查已正常運作的台北正式站。
+- 原因：把過期部署紀錄當作目標，未核對 AWS 專案、區域、主機與新網址；預設憑證失效也不能代表具名 profile 不可用。
+- 防：先讀 repo docs/CURRENT-STATUS.md 與最新 LOOP；核對具名 profile 的 STS 身分、區域、主機、公開頁面與主機版本。資料庫影子開關優先於設定檔；舊網址逾時不代表新服務失效。已在 repo AGENTS.md 加入固定入口。
+- 證據：line-ai-sandbox docs/status-evidence/20261105/，台北 running、服務 active、effective_shadow=true；LINE active=false，不混稱已收訊息。
+
+## 2026-11-05 串流取消把timeout包裝器強制終止算成正常取消
+- 錯：對GNU timeout包裝的Client程序群組送SIGINT，退出137仍依上游斷線與cancelled帳本判通過。
+- 原因：未區分包裝器的kill-after收尾與原Client正常中斷；單靠斷線和帳本不能證明原生取消。
+- 防：直接啟動原Client，送訊號前驗程序仍活著；超時或TERM/KILL只能清理並令驗證失敗。退出碼依版本相符官方行為及事件核對；強殺陰性必須被拒。
+- 證據：Gateway原Client取消，初版kxjy_qn_及xrejoyhg撤回；直接SIGINT hu_k_2wi／4cpuv0z8通過，強殺48goar1l以-9被拒。
+
+## 2026-11-05 職缺分類驗收關掉匹配篩選，漏掉使用者零筆狀態
+- 錯：新增企業 AI 分類後，以取消匹配限制的畫面宣稱可用；另將方向摘要放進完整要求欄，導致原技能被空白要求取代。
+- 原因：沒有驗預設及已保存地區／來源篩選的交集，也未檢查方向摘要進入完整要求分支的影響。
+- 防：分類驗收先保留預設匹配，再驗已保存的衝突條件、零筆復原、五個檢視與重讀；方向摘要須標明 scope=direction，不進入完整要求覆蓋技能分支。
+- 證據：JobResearch tests/test_job_views.py::test_direction_only_research_keeps_original_skills_and_fit；output/research/filter-recovery-20261105/verify_browser.py。
+
+## 2026-11-05 陰性對照誤把缺測試環境當作成功
+- 錯：Path('.venv/bin/python').resolve() 指向虛擬環境外的Python，pytest不存在；只驗退出碼1，誤把啟動失敗當變異測試確實抓錯。
+- 原因：解除虛擬環境執行檔的符號連結會失去環境；退出碼不足以證明測試已執行。
+- 防：用absolute()保留.venv路徑；核對具體失敗測試名稱、預期失敗數與斷言，不接受啟動或收集錯誤。T08原證據作廢並重跑，T07同時重驗。
+- 證據：line-ai-sandbox docs/status-evidence/20261105/daily-unlimited-negative.txt及shadow-reasons-negative.txt。
+
+## 2026-11-05 發布準備的動態載入寫入編譯快取
+- 錯：固定候選測試通過後動態載入準備模組，產生來源包外的__pycache__；正式切換後獨立來源讀回拒絕。
+- 原因：只在pytest子程序關閉bytecode，準備與讀回的Python程序仍會寫入；準備後沒有再次核來源。
+- 防：發布與讀回程序載入模組前關閉bytecode，準備後再核完整來源；測試必須包含真實動態載入及刻意改寫來源的反例。
+- 證據：line-ai-sandbox docs/status-evidence/20261105/web-assets-first-readback-failure.json；T30 failed保留，T31後繼修正，不重送舊作業。
+
+## 2026-11-06 Helios重抓合約介面離線通過但正式失敗
+- 錯：Mock通過後部署才發現 fetch_contracts(contract_download=True) 在正式SDK回 exclusive access lost，同步呼叫亦失敗。
+- 原因：未先實測現行SDK的合約重抓介面，假設登入可取得合約就代表該介面可獨立使用。
+- 防：合約更新必須實測現行SDK；此系統沿用登入時的目錄，僅在休盤且交易閒置時更新連線，並驗收新月份實際入庫，不以Mock代替。
+- 證據：Helios-quote-roll 的 quote_contract_auto_roll_receipt.json；2026-11-06 B路64個新月份選擇權五檔實際入庫。
+
+## 2026-11-06 撤銷金鑰前沒全面搜尋誰在用，還說「機器上沒有金鑰」
+- 錯：只查 ~/.claude 與 ~/.zshrc 就說找不到金鑰，撤銷舊金鑰後 Codex（/v1/responses）立刻 401；事後發現還有 environment.d 的 AGENT_API_KEY、agent-platform 與 agent-gateway-jev 設定也存放金鑰。
+- 原因：只查了 Claude Code 的路徑，沒有用金鑰指紋全機搜尋所有持有者；把「我查過的地方沒有」說成「機器上沒有」。
+- 防：撤銷、刪除、輪替任何憑證前，先用 rg 搜尋 ~/.config、~/.codex、~/.claude、~/.zshrc、服務目錄與 environment.d，並以 sha256 對資料庫指紋逐一認出持有者，全部更新後才撤銷。回報「找不到」必須列出搜過的範圍。
+
+## 2026-11-06 Helios把來源多列休市日與零量行情當成可交易
+- 錯：Yahoo來源多列2026-10-23，全股零量且沿用前收，仍被計為交易日；只看前日量還允許當日零量買入。
+- 原因：只檢同來源日期一致與價格完整，沒有先核官方交易日及當日能否成交。
+- 防：先以官方逐月日期核對，明列刪除休市日與缺日；個股零量日保留於市場日曆但拒絕進出場，補舊條件會假買入的反例。研究驗證已納入verify_holding.py，原始資料保留。
+- 證據：Helios output/research/equity-top50-one-year-20261106/holding-periods/calendar-verification.json、engine-verification.json；241日、179持有日、14項驗證。
+
+## 2026-11-07 歷史事件雜湊不是單獨文字雜湊
+- 錯：研究驗證先假設chat_events.content_sha等於sha256(content)，第一次核對失敗。
+- 原因：沒有先讀匯入器；實際雜湊含角色、傳送者、UTC時間與內容的JSON。
+- 防：先核原始雜湊算法，再從原ZIP用既有parse_rows重算；不變更來源或放寬斷言。
+- 證據：line-ai-sandbox docs/status-evidence/20261107/history-api-research-evidence.json及history-research-validation.json；54處原件已核。
+
+## 2026-11-07 API正文驗證不能用研究轉述當精確字串
+- 錯：用「三個不同社團」斷言週週分享正文，但原API寫「3個不同的娛樂城社團」，使成功取正文的分類被誤判失敗。
+- 原因：沒有先核實際工具回傳的原字串，並把驗證器錯誤混進模型評分。
+- 防：先讀實際工具結果再訂精確斷言；驗證器故障與模型格式／語意失敗分開，修正後重核原輸出並更正grade，不重送模型求過。
+- 證據：line-ai-sandbox docs/status-evidence/20261107/activity-followup-local-single-verifier-error.json保留無效初件；initial.json為核原文及更正評分後結果。
+
+## 2026-11-07 分類驗證只查必要子集會漏掉無關查詢
+- 錯：三題分類檢查用預期分類的子集判斷，將FB題多查推薦誤評為通過。
+- 原因：必要資料有查到不代表查詢方向正確；前文的額外分類也必須核對。
+- 防：呼叫前固定完整預期分類，依原輸出核對相等；保留初件、更正grade，不重送模型求過。另以正確、額外分類、漏分類及錯類四種對照核驗。
+- 證據：line-ai-sandbox docs/status-evidence/20261107/local-product-envelope-canary.json；原評分保留，最終0過3敗，4個對照通過。
+
+## 2026-11-07 Playwright安裝器會清除共用舊瀏覽器
+- 錯：執行playwright install時自動移除共用快取的1234版Chromium與1011版ffmpeg。
+- 原因：安裝器預設回收它判為未使用的版本；不同執行環境共用目錄但登記不完整。
+- 防：安裝一律設PLAYWRIGHT_SKIP_BROWSER_GC=1並優先獨立PLAYWRIGHT_BROWSERS_PATH；事前列版本，不能讓依賴安裝擴張刪除授權。
+- 更正：使用原codex-primary-runtime的Playwright、停用GC還原1234及1011；沒有刪除登入profile。
+
+## 2026-11-07 歷史對話遮罩漏掉中英文相連的帳號
+- 錯：以正規式\b當帳號邊界，中文和ASCII都算字元，前後緊接中文的歷史帳號未遮到。
+- 原因：只看已遮掉的例子，未檢查中文直接接英數的反例。
+- 防：用不依賴\b的英數比對並保留公開支付品牌及VIP級別；第二輪只加強遮罩，保存第一輪凍結輸入，明列差異，不宣稱完全相同輸入。
+- 證據：line-ai-sandbox .state/shadow-human-study-20261107/round2-input-note.json；下一步驗英數兩側中文、純數字及品牌例外。
+
+## 2026-11-07 在巢狀候選目錄執行git apply，沒有核對實際套用內容
+- 錯：候選位於主repo的.state子目錄，git apply回傳成功，誤以為候選已補上防護；候選完整測試仍有37項失敗。
+- 原因：git向上找到主repo，子目錄的套用行為與預期不同；只看退出碼，沒有讀回候選的差異。
+- 防：套用前確認候選的repo根目錄；非repo候選用patch並核對內容，或建立獨立repo。建包前比對前後完整檔案清單，確認只有核准檔案不同，並驗關鍵防護已存在，再跑固定候選完整測試。
+- 證據：line-ai-sandbox .state/delivery-identity/candidate-tests.txt保留失敗初件，candidate-final-tests.txt為修正套用後1039項通過；release.json列明4個變動檔。
+
+## 2026-11-07 驗證器猜錯平台錯誤碼
+- 錯：將本人拒查的錯誤碼猜成scope_unverified，原件實為platform_scope_unverified，使28次研究重播驗證初件失敗。
+- 原因：未先核工具回傳及程式原字串。
+- 防：先核member_tools.py與保存原件；保留驗證器故障初件，不重送模型或混入語意分數。專案verify-r4-r5.py已加入錯誤碼改壞須拒絕的對照。
+- 證據：line-ai-sandbox .state/shadow-human-study-20261107/production/r4-r5-validation-initial-failure.json及r4-r5-validation.json。
+
+## 2026-11-07 pytest設定覆蓋陰性對照的來源路徑
+- 錯：只改PYTHONPATH指向破壞版，但pytest的pythonpath設定先載入候選原版，使破壞版仍通過。
+- 原因：未核pytest設定的匯入優先序。
+- 防：陰性對照明設-o pythonpath為破壞版絕對路徑，且核指定測試名稱與預期斷言；初件通過不算抓錯證據。
+- 證據：line-ai-sandbox .state/history-rag-20261107/r2-negative-initial-wrong-import.txt保留初件；r2-negative-controls.txt修正後精確1項斷言失敗。
+
+## 2026-11-08 固定發布腳本搬移後仍以自身目錄找附檔
+- 錯：部署器將腳本複製到作業目錄後，腳本用 __file__ 的父目錄讀 release.json，導致本機前置失敗，未進遠端。
+- 原因：只驗原路徑，沒有驗複製後執行；忽略發布器會搬動腳本。
+- 防：固定腳本所有附檔使用已核絕對路徑，從另一暫存目錄載入檢查後才登記；舊失敗作業保留，不改已固定腳本。
+- 證據：line-ai-sandbox T53 作業43b09c0d的deploy.stderr；T54承接修正。
+
+## 2026-11-08 RAG供稿驗證誤比巢狀JSON跳脫字串
+- 錯：直接在序列化整份模型請求內找片段原文，因換行被再次跳脫而誤報未供稿。
+- 原因：請求中的content本身是JSON字串，整份再序列化後不是原片段字面文字。
+- 防：先解開content，再逐一比較untrusted_historical_references中的完整結構；保留初次驗證失敗，不重送付費模型。
+- 證據：line-ai-sandbox .state/recent10-opus-20261108/validation-initial-failure.json與docs/status-evidence/20261108/recent10-opus-shadow.json；32片完整比對及移除供稿對照已核。
+
+## 2026-11-08 部分會員名單只有一候選不能證明LINE UID唯一
+- 錯：為移除全量掃描門檻，候選改成只讀部分快取的一筆對照並核最新詳情，仍會漏未同步頁的重複UID。
+- 原因：三欄即時相符只能證明這筆資料相符，不能證明平台沒有另一個相同UID的帳號。
+- 防：沒有平台精確單人搜尋或其他可驗唯一來源，不得以部分快取唯一作授權依據；保留兩頁同UID的合成反例。候選在審查時撤回，未發布。
+- 證據：line-ai-sandbox docs/status-evidence/20261108/member-direct-query-investigation.json。
+
+## 2026-11-08 候選撤回與審查保存原碼交錯
+- 錯：審查反例已對候選執行，但保存來源時主代理正好撤回，使第一份證據混入原版程式。
+- 原因：讀來源與保存證據分開執行，沒有固定同一份來源快照。
+- 防：以撤回前保存的差異重建獨立候選，固定原碼與雜湊後再重播；主代理已重現並保留初件，後續審查先固定來源再執行。
+- 證據：line-ai-sandbox .state/member-direct-20261108/safety-review-reconstructed.json及safety-reproduction-primary-final.txt。
+
+## 2026-11-08 正式來源驗證匯入模組會產生額外暫存檔
+- 錯：正式版讀回已通過後，用遠端stdin匯入專案模組做資料庫與歷史搜尋驗證，未先停用位元組快取，新增3個__pycache__目錄與20個pyc，會破壞固定來源清單。
+- 原因：服務本身停用快取不代表另外啟動的Python同樣停用。
+- 防：正式遠端驗證一開始設sys.dont_write_bytecode=True或PYTHONDONTWRITEBYTECODE=1；結束後重核固定來源。這次新增暫存已移往私有區完整保留，再以原固定讀回程式重驗，未刪來源或修改驗證規則。
+- 證據：line-ai-sandbox .state/member-account-import-20261108/generated-cache.json、preserved-generated-cache.json、final-production-readback.json。
+
+## 2026-11-09 混合對話來源不可強取匯出識別欄位
+- 錯：將CSV匯出與使用者補貼的切點一併傳入舊重播器，舊程式直接讀conversation_sha256，補貼來源缺該欄而在模型呼叫前停止。
+- 原因：未先檢查重用重播器對source結構的前提。
+- 防：依來源類型建立可追溯欄位；只對CSV來源檢查匯出對話雜湊，補貼資料明記原始時間未知。保留初件；修正前先驗混合案例資料結構，不能補造對話雜湊。
+- 證據：line-ai-sandbox .state/xikg371-study-20261109/runner-private.py.stderr及runner-r1.py.stdout；首件付費模型呼叫0。
+
+## 2026-11-09 Claude單次預算旗標不能當首個請求的硬額度
+- 錯：Fable評審設--max-budget-usd 0.70，但單次模型完成後才判超額；CLI折算US$2.74204並只輸出error_max_budget_usd，沒有評語。
+- 原因：把CLI整體停止門檻當成發送前的費用預留上限，且使用JSON終件格式未保留中間原文；完整編碼代理提示與重複證據增加輸入。
+- 防：呼叫前估算輸入與最大輸出，合併重複證據，評審使用明確簡短角色提示；保留失敗費用，不用成功件覆蓋。需保留中間輸出時先驗stream-json的實際收據；不可假稱本次找回原文。
+- 證據：line-ai-sandbox .state/xikg371-study-20261109/fable-raw.json；更正交付方式後fable-compact-raw.json折算US$1.28612325，compact-validation.json已核63則前文、44工具與48片歷史內容一致。
+
+
+## 2026-11-09 固定發布入口須核對直接執行與環境參數
+- 錯：初版發布器缺直接執行入口，在本機停止；部署後獨立讀回又漏CASH_DELIVERY_ENVIRONMENT，亦在遠端呼叫前停止。
+- 原因：只檢查載入，未完整核對發布工作器提供的執行方式與環境。
+- 防：固定入口複製到另一目錄後直接執行probe；獨立讀回先依worker契約帶入已核的環境與限制，不重新部署。保留每次失敗原件。
+- 證據：line-ai-sandbox .state/account-query-20261109/release-v2/adapter-check.json、post-canary-readback.stderr與post-canary-readback-r2.json；T64失敗由T65承接，正式179份來源讀回通過。
+
+## 2026-11-09 Fable輸出上限包含內部推理，CLI會自動接續
+- 錯：RAG審查設high effort與8500個輸出token，第一個回應全用於內部推理，沒有報告；CLI再自動接續兩次才完成，--max-turns 1沒有把API請求限制為一次。
+- 原因：只按報告篇幅預留輸出額度，未把內部推理與CLI長度截斷接續算入；把wrapper不重試誤寫成整體不會多次請求。
+- 防：輸出額度要同時計入推理和正文；完整文件審查依模型已核最大輸出留足空間，合理降低effort；保存stream-json並核每次自動接續與總用量，不將max-turns當單次請求或費用硬界線。
+- 證據：rag .state/fable-review-2026-11-09T07-46-03-236Z/claude-stream.jsonl及docs/research/json/fable-review-2026-11-09.json；最終報告兩段完整接回，CLI牌價折算US$4.590301，未隱藏截斷初件。
+
+## 2026-11-09 RAG文件驗證需區分SVG原生頁與表格閱讀順序
+- 錯：直接截SVG原生頁逾時；ImageMagick預設SVG轉圖漏中文字；用pdftotext -layout把整個表格儲存格當連續字串比對，誤報原文缺漏。
+- 原因：沒有先核本機SVG渲染器與字型支持；表格分欄抽字會交錯其他欄位，不等於內容消失。
+- 防：沿用已裝Chromium，以HTML承載SVG再截圖；PDF同時核layout與raw抽字順序，SVG圖以實際圖面驗，保留失敗初件。Node套件由package.json根的createRequire解析，不猜實體入口檔名。
+- 證據：rag .state/fable-plan-integration-2026-11-09T08-01-37-135Z/data-flow-initial-convert-missing-glyphs.png、text-validation-initial-table-order.json及docs/research/json/fable-plan-integration-2026-11-09.json；725段文字、46頁底色與最終圖面已核，未實作產品。
+
+## 2026-11-09 同一進度檔的多任務與單任務交付設定不相容
+- 錯：新任務追加到已結案任務的歷史檔，改交付設定為新任務後，舊任務的結案檢查持續失敗；未先找保留原文的修法就要求使用者授權拆檔，造成反覆結案與等待。
+- 原因：進度格式容許多任務，但交付設定及登記以單一任務配對；只驗本輪，漏驗已登記舊任務。
+- 防：新任務使用獨立進度檔及同名交付設定；結案核全部登記。既有歷史不手改；本次用同內容硬連結建立第二入口，保留19筆原文，修正設定及登記。兩任務均終止，不再追加；後續不得沿用這個共享歷史建立新任務。
+- guard: ~/.agents/guards/delivery_state_check.py 已持續拒絕錯配，未修改或停用；修復前拒絕對照與修復後完整通過均已保存。
+- 證據：rag .state/langchain-boundary-20261109/closeout-negative-r2.json、closeout-repair-receipt.json、closeout-validation.json；兩入口內容雜湊相同，五份檢查工具雜湊未變，原收工檢查 problems及faults皆空。
+
+## 2026-11-09 自訂問答數字不可混入個人查帳來源
+- 錯：將後台全部Q/A答案加入數字允許來源，會讓無關活動數字通過個人餘額驗證。
+- 原因：把一般規則與本人API結果視為相同證據；僅用提示詞限制不能保住程式防護。
+- 防：個人必查或模型get_my_工具執行後，仍只核原API來源；一般配對須唯一，直接輸出原Q:A且保留個人／操作結果阻擋。以API12、QA99999、錯答99999拒絕與真12通過同時驗必要預查及臨時查詢；不取消原required_calls。
+- 證據：line-ai-sandbox tests/member_service/test_qa_settings.py及.state/qa-settings-20261109/negative-r5-personal-grounding.txt。
+
+## 2026-11-09 背景交付需帶入本機使用者服務連線
+- 錯：目前shell未帶使用者服務的環境值，進度工具無法派送，記為dispatch_unknown；其後誤把delivery清單當成submit的進度輸入，亦未進遠端。
+- 原因：沒有先核對登入shell與使用者服務的連線；submit實際接收checkpoints路徑而非delivery清單。
+- 防：先核UID及/run/user/UID/bus，以實際XDG_RUNTIME_DIR與DBUS_SESSION_BUS_ADDRESS查unit；確認同次開機且unit不存在，再用原checkpoints路徑執行既有submit。保留初件，不直接手寫作業狀態或重跑部署器。
+- 證據：line-ai-sandbox .state/qa-settings-20261109/dispatch-initial.json；T69原作業69f78024以同一固定版本首次啟動。
+
+## 2026-11-09 本機模型評分不可猜執行編號
+- 錯：尚未讀候選輸出的首行就臆測 localai run id，評分器回 no run with id，未寫入評分。原因：把定位資訊當成可推估的值。防：先讀輸出原件首行的實際 run id，再評分；unknown id 已由 localai grade 拒絕，不能藉重試猜編號。證據：ai-gateway R1-S2 validator-draft.txt 的實際編號 20261109-202719-1205022 與本輪工具錯誤原件。
+
+## 2026-11-09 有工具結果不能代替完整工具歷史
+- 錯：S2續談驗證器只核隨機值、結果與編號，真實原件刪掉工具要求後仍通過。原因：沒有逐輪保留原工具要求及名稱。防：同時核原工具要求、名稱、編號、完整結果與使用者指令；兩Client兩方向各刪要求或結果的八項原件對照均須拒絕。專案test_client_capture_validation.py新增機械回歸，53項通過；初件missing-call-initial-control.json保留。證據：ai-gateway R1-S2 actual-capture-replay-r3.json。
+
+## 2026-11-09 追加查帳不得猜資料表名
+- 錯：401實送完成後，附加查帳查詢使用不存在的upstream_attempts，PostgreSQL回relation does not exist，未改資料。原因：未沿用現成provider_attempts查詢。防：先讀實際queries或schema；本輪直接核既有test_codex_held_result.sql及原驗收result，不能把失敗查詢當證據。證據：ai-gateway R1-S4 claude/result.json及diagnostic-errors.json。
+
+## 2026-11-09 Rust測試格式必須先檢查
+- 錯：新增測試後未先格式化就啟動all，已通過Python與前端後才被fmt-check擋下。原因：漏掉既定格式步驟。防：每次Rust修改先格式化再進完整檢查；首件保留，修正後才續驗。guard: ai-gateway scripts/check.sh fmt-check及既有提交掛鉤，會拒絕未格式化的差異。證據：R1-S4 all.log與all-r2.log。
+
+## 2026-11-09 完整驗證也須使用版本相符的隔離庫
+- 錯：R1-S4 all使用預設舊gateway測試庫，Rust測試後的啟動保密掃描被舊migration checksum拒絕。原因：沒沿用之前全套的獨立測試庫。防：完整驗證一開始明確指定本輪獨立庫，先用啟動掃描核對；保留舊庫，不改checksum、不清資料。guard: SQLx啟動migration checksum與check-log-secrets拒絕不相符版本。證據：ai-gateway R1-S4 all-r2.log、diagnostic-errors.json。
+
+## 2026-11-09 假供應商驗收須沿用指定Client路線設定
+- 錯：S4新的Codex認證恢復模式沒帶入S1已驗的零自動重送設定，原Client預設共送六次而非一次。原因：設定僅由check-local模式加入，錯把假供應商模式視為同一Client設定。防：驗收前讀回兩份實際設定；新模式沿用既有路線，原失敗保留，使用範例同步補齊。guard: verify-client-identity.py認證恢復要求錯誤一次及恢復一次，缺設定會實際拒絕；不改判原六次成功。證據：R1-S4 upstream-auth codex-settings-comparison.json與codex_default_failure/codex原件。
+
+## 2026-11-09 初始化後的排他鎖須明確釋放
+- 錯：既有capture_keyring初始化只drop檔案，並行全套在初始化完成後locked_current失敗，單獨則通過。原因：檔案已完整、鎖尚不可讀；依Linux描述符共享語意推測被fork子程序短暫繼承，未拍到初件child，不能當直接證實。防：完整寫入及同步後顯式unlock，保留失敗原件；strace四階段原版零次解鎖、補強後各一次，最終兩Client重驗及完整門檻通過。證據：ai-gateway R1-S4 upstream-auth keyring-lock-evidence.json、keyring-before/after.strace與all-final.log。
+
+## 2026-11-09 Claude中途斷線須分開關一般重試與非串流備援
+- 錯：沿用Gateway模型清單stream_max_retries=0便推定Claude不重送；原Client部分輸出斷線共六次且逾時。只設CLAUDE_CODE_MAX_RETRIES=0仍四次，含非串流備援。
+- 原因：Gateway輸出的模型欄位不等於Claude實際消費；備援與一般重試是不同路徑。
+- 防：先核官方及實際Client；同時設CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1與零一般重試，隔離原Client實送一次失敗再一次新請求成功才算過，保留六次與四次初件。guard: ai-gateway verify-client-identity.py串流恢復模式硬核一次錯誤、一次恢復及退出1/0，不接受timeout或偷偷重送。
+- 證據：/home/cash/.local/state/ai-gateway/r1-s4-stream-interruption-20261109/source-and-profile.json、claude/result.json、claude-default-failure/error-result.json與claude-retry-zero-failure/error-result.json。
+
+## 2026-11-09 影子畫面樣本須先核完整資料表必要欄位
+- 錯：本機畫面樣本只寫顯示欄位，漏shadow_simulations的source_revision等必要欄位，服務在啟動前被SQLite拒絕。原因：未先讀完整schema。防：畫面造資料先讀migration的全欄位，保留失敗原件，補齊版本、操作人與時間窗再用新隔離庫啟動；不得改資料表以配合樣本。證據：line-ai-sandbox .state/shadow-reasons-20261109/browser-check-initial.txt與browser-check.json。
+
+## 2026-11-09 新進度步驟須先登記可開始狀態
+- 錯：新T70直接寫VALIDATING，被checkpoint schema拒絕，未寫入或派送。原因：新step只允許PENDING或READY起始。防：先用原工具登記READY，再轉RUNNING及VALIDATING；保持原序號與當次實際時間，不手改JSONL。guard: cash-rule checkpoint schema的新step狀態轉換已機械拒絕。證據：line-ai-sandbox .state/shadow-reasons-20261109與母檔iteration272-274。
+
+## 2026-11-09 R1-S3重複腳本語法錯誤改為執行前阻擋
+- 錯：臨時Node讀回用require又在頂層await，Node22拒絕；新step直接RUNNING也被原schema拒絕，兩者未寫入產品資料。
+- 防：新step先READY成功再RUNNING；保留原schema機械拒絕，不另造狀態機。Node改用async函式或明確module/import。guard: ~/.agents/guards/node_stdin_guard.py與write_guard.py的node-ambiguous-stdin，固定heredoc與開頭require形狀才檢查，只有確知的頂層await錯誤才擋；不執行腳本，未知形式放行。
+- 證據：ai-gateway r1-s3-stream-cancel-20261109/node-guard-before.log兩項失敗、node-guard-after.log含既有路徑與glob共43項通過；實際PreToolUse攔錯，合法async腳本實跑通過。原write_guard只加四行接入，未停用任何規則。
+
+## 2026-11-09 職缺試匯入需核對歷史追加，不能要求歷史表雜湊不變
+- 錯：將所有非目標表視為應完全不變，誤把新增職缺觸發的jobs_history正常追加判成資料破壞。原因：未先核對資料庫觸發器。防：先讀schema，原歷史逐筆保留，僅允許對應本批新增職缺的insert事件，重播不得追加歷史；補空白內文亦限description與detail_fetched_at。證據：JobResearch output/research/future-companies-20261109/initial-validation-failure.json、verify-import.py及final-db-verification.json。
+
+## 2026-11-09 模型回覆的非法JSON數字不可改成缺值
+- 錯：模型HTTP回覆含prompt_eval_count:NaN時，解析器把NaN改成null，合法向量因此成功並把壞用量當未知。
+- 原因：parse_constant回None掩蓋了非法JSON；未區分未回報與回傳壞值。
+- 防：解析時拒絕NaN、Infinity、-Infinity，保留缺欄位/明確null的未知用量正例；真解析路徑及同鍵無重送均要驗。rag測試test_nonfinite_json_cannot_become_unknown_usage三例已加入回歸。
+- 證據：rag .state/rag-product/P1/old-parser-control-RSmJTr/result.json三案DID NOT RAISE；修正版537fe3c與review-r3-epXQp1/review.json通過。
+
+## 2026-11-09 章節路徑長度不是標題深度
+- 錯：純文字從二級標題開始或跳過中間層級時，同級例外被掛成前一章的子章。
+- 原因：用已存在章節數代替實際井號深度，層級缺漏時兩者不同。
+- 防：堆疊同時保存實際深度及標題，新章節彈出同級與更深項；從二級開始、從一級跳三級兩個固定反例納入test_heading_depth_survives_missing_levels。
+- 證據：rag .state/rag-product/I1/rejected-v2/heading-regression.json兩案失敗；修正版subject-r2.json與同版獨立複核保存於I1原件。
+
+## 2026-11-09 真實回應測試樣本不得手動省略欄位
+- 錯：真Gateway回應同時含reasoning與tool_calls.index，手寫回歸只保留reasoning，快檢過後原CLI仍在工具前失敗。
+- 原因：以摘要的欄位形狀代替完整HTTP原件，沒有核工具要求內的全部欄位。
+- 防：從完整原件複製後僅去識別化值；機械比對全部鍵、型別及清單長度相同，再以完整樣本先紅後綠。未知非空內容仍拒絕；冗餘序號須驗與清單位置一致，不能直接放寬所有欄位。
+- 證據：agent .runtime/p02-native-fixture-projection.json、p02-tool-index-red-r2.txt及p02-tool-index-green.txt；原件保留，首個p02-tool-index-red.txt因樣本產生未套用而不是陰性對照。
+
+## 2026-11-09 真模型取消先核實際slots格式，不能只看文件或型別
+- 錯：文件把next_token列成物件，本機llama-server實值卻是含一個物件的陣列；只補空陣列fallback後又失敗。兩次都在原Client生成前停止，不能當模型取消失敗。
+- 原因：看到list型別就推定為空，沒有先讀取去內容的實際結構。
+- 防：先保存僅計數/旗標的API結構原件，再支援文件物件與本機單元素陣列；實際陣列回歸必跑。guard: ~/.agents/guards/ollama_slot_shape_guard.py經write_guard.py的ollama-slot-shape，固定真模型取消CLI啟動前會讀已知helper，攔直接對next_token接get的形狀；未知動態命令保留不攔。
+- 證據：ai-gateway r1-s3-real-cancel-20261109/runner-token-schema.json、actual-schema-before.log、validator-after.log；guard合計49項通過，真PreToolUse攔錯及正確CLI的--help放行。編輯payload僅單測有效，本次Codex編輯工具未攔，已用實際可用的CLI啟動路徑補上，不宣稱編輯已全面覆蓋。
+
+## 2026-11-09 驗收器單元綠燈不能取代CLI入口語法檢查
+- 錯：保存驗證單元80項過，verify-client-identity入口卻因本輪縮排錯誤無法解析，沒有發出模型請求。
+- 防：完整檢查一開始解析scripts全部Python入口，避免只測被匯入模組。guard: ai-gateway scripts/check.sh all的ast.parse前置檢查；隔離複本放錯誤縮排，確實在migration及服務前拒絕，首件保留，不以重跑模型代替。
+- 證據：r1-s3-real-cancel-20261109/claude-syntax-initial.log、syntax-before.log、syntax-gate-control.json；沒有改生產Rust或Client執行檔。
+
+## 2026-11-09 查帳路由身份須比對設定識別字
+- 錯：隔離Gateway查帳的驗證器拿provider種類ollama比較實際provider_key，誤報非免費路由，未改資料。原因：混用種類與識別字。防：先讀本輪唯一profile，以provider_key、model、attempt_number逐項核；保留原件，用同一SQL輸出修正比對，不重送模型。證據：agent .runtime/p02-isolated-gateway-20261109/final-ledger-readback.json與final-ledger-validated.json。
+
+## 2026-11-09 SQLx新查詢須沿用完整編譯結構與真正測試入口
+- 錯：新增查詢直接online編譯，主測試庫沒有獨立見證schema；改庫後誤用--bin，實際0項，沒有當成通過。
+- 防：新描述在隔離複本以既有完整見證schema腳本及無登入角色準備，不更改正式或共用測試結構；先核lib/bin實際入口與執行項數。sqlx prepare會修剪未引用舊描述，保留原件且只提交本輪三個實際生成描述，不順手清理。
+- 證據：ai-gateway r1-s3-capture-read-20261109/repeat-import-before.log缺schema、before-r2零項、before-r3真1項40001失敗；sqlx-generated.json與archive-after.log15項通過。
+
+## 2026-11-09 資料庫單句期限不能代替整次期限
+- 錯：H1只設每句statement_timeout，多批或前查耗盡期限後仍送INSERT/相似度查詢，甚至回完整收據。
+- 原因：後續批次沒有再核固定截止時間；各句時間相加可超出原請求。
+- 防：每次SQL與批次、提交及成功回傳前核期限；PG17以transaction_timeout另限整次交易，SQLite循環核時及中斷，超時穩定回TIMEOUT。
+- 證據：rag H1 review-we6jjo/probe-result.json舊錯；replay-6RwZ49及native-deadline-2gLeA1驗新，真150ms超時25P04回滾0筆。
+
+## 2026-11-09 精確數字必須保存正負號並換設定版本
+- 錯：H1把-120與120都存成相同精確詞，負數問題命中正數原文。
+- 原因：數字擷取規則未包含符號，卻宣稱完整相等。
+- 防：正負號按字面保存並升identifier_rule至ascii-exact-signed-v2，舊索引設定不相容就拒絕；+、-、unicode減號均有回歸。
+- 證據：rag H1 old-regressions-zAGTgG三案舊錯，checks-r4及live-hHdT5l真詞搜通過。
+
+## 2026-11-09 模型請求不能在途中重讀呼叫者可變清單
+- 錯：P1/H1向量已送hello，呼叫者清單被改後卻回different source的雜湊；證據清單被清空還繼續送已過期來源。
+- 原因：前後各階段沿用可變外部清單，沒有固定這次輸入。
+- 防：入口複製文字與證據外層為tuple，送出、計數、雜湊與逐次核權均用同一份；裸字串仍拒絕。
+- 證據：rag H1 review-we6jjo原件、old-regressions-zAGTgG三案舊錯；replay-6RwZ49確認雜湊相符且過期後零模型呼叫。
+
+## 2026-11-09 慢讀量測須分開已消費資料與未讀積壓
+- 錯：來源已恢復後，以總傳送量判超8MiB，忽略Client已讀量；第二暫停只留3秒也不足原8樣本穩定窗，驗收正確拒絕，沒有改判。
+- 防：未消費量按來源已送減Client已讀；兩暫停採同樣6秒有界觀察，8樣本/1.5秒/32MiB門檻不降低。只讀192KiB不足釋放核心送出緩衝時，有界放行最多4MiB再恢復小接收窗，須實際看到來源進度。保留量必須大於0，單筆限制改用合法per-provider/per-model=1；不改產品設定驗證以配合測試。
+- guard: ai-gateway scripts/client_slow_reader.py的validate_pressure會拒絕短窗/未恢復/過量RSS或積壓；test_unread_backlog_counts_consumed_bytes_separately回歸已過。證據：r1-s3-slow-reader-20261109/initial-failures.json、case-summary.json與unit.log；快讀真反例被CLI拒絕。
+
+## 2026-11-09 發布前須拒絕版本宣稱取代自己
+- 錯：K2接受revision=r1且supersedes_revision=r1，先成功啟用又在同交易把該版失效，下一次查詢立刻STALE。
+- 原因：只核型別與索引收據，沒有核取代關係不能指向自身。
+- 防：發布清單驗證前拒自我取代，原active、publications及source_invalidations必須都不變；保留staged原件，不做通用圖驗證。
+- 證據：rag K2 source-validity-upD38u與review-k2-review-20261109/self-supersede獨立重現；source-validity-fixed-zHCIPL拒INVALID_ARGUMENT，test_self_replacement_cannot_change_publication_state回歸。
+
+## 2026-11-10 Codex429應核正常失敗事件與真請求編號，不強求來源marker
+- 錯：沿用一般HTTP錯誤marker要求，Codex0.166.0實際只顯示429及Gateway id，雖一次來源/退出1仍被驗收器誤報。
+- 防：只在Codex429新模式改核單一turn.failed、明確429及完整實際Gateway id；不放寬其他錯誤。先用原診斷與入口log重播，再新隔離案例完成另一新請求恢復；原命令失敗保留。顯示retry limit不等於實際重送，仍用入口/來源次數與帳本對回。
+- guard: scripts/client_capture_validation.py validate_rate_limit_diagnostic及3項回歸拒絕錯ID/前綴/狀態/非失敗/重複；原輸出與真Gateway id已重播。證據：r1-s4-transient-recovery-20261109/codex-429-original-replay.json、case-summary.json及unit.log。
+
+## 2026-11-10 通道名稱不能直接拼成發布清單欄位
+- 錯：I2合併舊來源時用vector加_profile找欄位，真清單實際叫embedding_profile，六個整合案例同樣KeyError。
+- 原因：依通道名稱猜欄位，未沿既有發布資料格式明確對應。
+- 防：lexical對lexical_profile，vector明確對embedding_profile；合併舊來源仍重核真索引，保留舊知識的完整匯入案例納回歸。
+- 證據：rag I2 rejected-append-r1保存初版及KeyError原輸出；test_complete_import_preserves_existing_knowledge_and_is_replayable與live-PpS9ZV完整原生流程通過。
+
+## 2026-11-10 租戶反例必須確認真的改到金鑰
+- 錯：以含連字號UUID替換Gateway金鑰內的tenant，但實際使用UUID.hex，結果原金鑰未變仍200，不能說跨租戶繞過。
+- 防：先核generate實碼，用相同格式且只替換一次；送出前比較反例與原件，未變就拒絕。原失敗及修正版401/零上游皆保留。
+- 證據：ai-gateway r2-access-matrix-20261110/initial-tenant-control-failure、client_access_matrix.py的變更確認。
+
+## 2026-11-10 入口編號不代表一定已有帳本
+- 錯：假設所有認證後錯誤都會先建立帳本，預期21筆，實際16筆；來源憑證選擇503在profile_for_user即返回，先於保存/ledger。
+- 防：先核實呼叫順序，再逐筆比入口、日誌、來源、帳本；缺帳本明列，不拿日誌冒記帳，也不猜配額洩漏。本輪13完成/3政策額度拒絕歸屬對回，5來源503及2認證401只有日誌。
+- 證據：ai-gateway r2-access-matrix-20261110/ledger-assertion-initial.json、matrix-summary.json及src/services/openai.rs的profile→capture→ledger順序。
+
+## 2026-11-10 原碼快照須保留完整相對路徑
+- 錯：快照只取basename，src/store/result_snapshot.rs與tests/result_snapshot.rs同名，第二份被wx防覆蓋拒絕，未覆寫原件。原因：丟失來源目錄。防：以repo相對路徑保存每份快照，寫入仍用wx；原先source副本保留並標明，依實際留下物補完，不重跑整段。證據：agent .runtime/p02-v4-result-candidate/miss.json的snapshot_note及before/目錄。
+
+## 2026-11-10 checkpoint必須依剛讀到的終局組參數
+- 錯：完整檢查已回all-exit0，下一個工具仍沿前段舊文字記not_run/仍執行，形成checkpoint119過時狀態。
+- 防：終局讀回與狀態寫入分開決策；看到退出碼先更新檢查結果再組checkpoint，不能在同一批工具中預填舊狀態。用既有工具追加更正收據，不改舊JSONL，不為狀態文字重跑未變測試。
+- 證據：ai-gateway r2-first-use-20261110/all-exit.json、full-check-summary.json、summary.json及checkpoint120；538/272/22實際通過，119舊文字保留。
+
+## 2026-11-10 下一票必須重算依賴，不可沿先前預測
+- 錯：K2完成後歷史next誤寫P2但最早I2；I2完成後又誤寫B1但新解鎖D1，實際開工前均已改回票表順序。
+- 原因：在完成前先猜下一票，沒有從最新tickets狀態重算。
+- 防：下一票由最新依賴表計算；原歷史不改，後續READY記正確票。guard: ~/.agents/guards/rag_next_ticket_guard.mjs由write_guard.py的rag-next-ticket在PreToolUse讀schema3「最早必備票」，阻錯READY及DONE的具體下一票標記；其他格式未知則放行。
+- 證據：rag .state/rag-product/next-ticket-guard-lhuLhy，四組hook正反過；真PreToolUse攔錯B1的--help、D1正例exit0，均未執行writer或改歷史。
+
+## 2026-11-10 多租戶驗收須明列provider可信租戶，不能沿用bootstrap預設
+- 錯：同庫先bootstrap租戶A，再改ADMIN_BOOTSTRAP_TENANT_ID為B重啟；未設PROVIDER_ALLOWED_TENANT_IDS，原A請求503，實際是可信來源門檻，不是跨租戶憑證失效。
+- 防：先讀provider_allowed_tenants，隔離測試只明列A/B兩UUID，保留產品信任檢查，不用全開或關驗證。原503/零來源保留；修正後同名模型各用正確來源，A政策允許B-only仍被租戶模型清單拒絕。
+- 證據：ai-gateway r2-tenant-access-20261110/initial-trust-rejection、兩final validation.json及src/config.rs:955。
+
+## 2026-11-10 來源失效不能只標目前已發布修訂
+- 錯：D1只把當下版本失效，合法舊頁較晚提交時仍能建立另一修訂；完整空清單也未阻未曾發布的舊列。
+- 原因：缺少持久的來源刪除位置及完整清單邊界，發布只檢查修訂本身。
+- 防：保存單列失效序號與完整鏡像清單上界/成員，只前進；送模型前及最後發布在共用政策鎖內重核，重開保存層仍阻舊頁，新事件才可恢復。
+- 證據：rag D1 review-20261110-ab4bd6ec兩獨立復活、old-validity-regressions.stdout.txt四舊失敗保留；回歸含晚到發布/未曾發布列/重開/舊清單不得倒退。
+
+## 2026-11-10 新驗收模式須核完整入口限制
+- 錯：R3-S2新內容授權模式通過語法解析，卻漏補既有check_capture允許條件，首件CLI在建立runtime或送請求前退出2。
+- 防：新增模式須讀完整parser檢查區及所有同類模式條件；保留預設限制，只加入新模式的明確合法組合，再用真CLI入口執行。首件空測試DB及拒絕原件保留，不當功能通過。
+- 證據：ai-gateway r3-capture-access-20261110/initial-parser-rejection與verify-client-identity.py的capture模式條件；未修改正式Rust或Client。
+
+## 2026-11-10 等待保存入庫須先核背景週期
+- 錯：R3-S2以25次/0.1秒等新capture入DB，來源已看到0/1兩密文方向且回應200，卻誤以無DB列判整輪失敗。
+- 原因與防止：startup實碼每30秒跑維護，沿既有原生驗收50秒上限的設計，以40秒/最多40次唯讀狀態讀回等待；連線錯誤立即停，不重送來源，不修改產品週期或預期狀態。
+- 證據：r3-capture-access-20261110/initial-import-wait保留首件；src/startup.rs的Duration::from_secs(30)，原DB0/capture檔仍在，不宣稱產品漏存。
+
+## 2026-11-10 批准驗收須等待實際動作提示
+- 錯：CLI接續測試以包含「輸入 /approve 或 /deny」作等待條件，誤匹配啟動模式說明，在動作尚未展示時就送批准，被正確拒絕。
+- 防：等待完整動作提示行及結尾換行，並核工具、檔案、參數與新次批准；保留原錯測，不把測試過早送出歸咎產品或放寬審閱關卡。
+- 證據：agent .runtime/p04-resume-core/cli-resume-r2.txt、r3.txt 與修正後r4.txt。
+
+## 2026-11-10 私人來源撤權須覆蓋已取得證據
+- 錯：D2只在保存層核私人主體，獨立Policy可漏核；收回來源保存權後回讀拒絕，但已取得的Evidence仍可外送。
+- 原因：來源限制沒有全部接共同證據檢查路徑。
+- 防：Policy.check_document直接核私人主體，保存層來源驗證另核現行保存權；回讀/外送/共同出口都走同一檢查，保留權收回後不能用舊物件繞過。
+- 證據：rag D2 source-authorization-first-failure兩個DIDNOTRAISE；現版32相關/255全套與live-OGkytI17真PG檢查過。
+
+## 2026-11-10 無狀態來源查詢不得另排長時鎖
+- 錯：D2外層RLock包住整次DB等待，另一個80ms期限的呼叫要等350ms才拒；進行中同鍵也被等成完成。
+- 原因：來源服務沒有自有可變收據，卻重加一層佇列，既有ExecutionGuard並行限制無法及時回應。
+- 防：移除多餘來源鎖，以既有守門立即拒過載，同鍵未完成明示工作狀態；模型/來源等待不占額外鎖。
+- 證據：rag D2 queue-first-failure兩舊失敗；兩受控並行回歸及live-OGkytI真PG鎖定下的快速過載拒絕過。
+
+## 2026-11-10 重播回歸的失敗須先排除測試環境與時間錯置
+- 錯：R3-S3首個DB回歸忘設DATABASE_URL，補後又以早於RequestStart的now作completed_at，先後得到缺環境與23514，尚未跑到重播缺陷。
+- 防：沿既有隔離庫明設DATABASE_URL/SQLX_OFFLINE；完成時間從已建立封套的created_at往後取。只把真正走到改用量仍成功的失敗當陰性對照，不把測試前置錯誤當產品缺陷。
+- 證據：ai-gateway r3-usage-replay-20261110/rust-before.log、rust-before-db.log、rust-before-valid-fixture.log；最後一份才是改input_tokens被誤接收。
+
+## 2026-11-10 JSON取欄位再相減須明確加括號
+- 錯：envelope->'request' - ARRAY被PostgreSQL按減法優先解析，將request字串轉JSON時22P02；Rust編譯無法證明PLpgSQL內部語句正確。
+- 防：寫成(envelope->'request') - ARRAY；先在隔離PG以真封套執行新增函式，再跑全套，不靠閱讀或編譯聲稱SQL正確。
+- 證據：ai-gateway r3-usage-replay-20261110/rust-after.log保留舊失敗內文；rust-after-parentheses.log真封套回歸通過。
+
+## 2026-11-10 重開暫存後的重播必須是同一份完成紀錄
+- 錯：既有DB故障測試直接complete封套卻漏finalized=true，重開會依原恢復規則改成取消，之後拿舊記憶體封套誤稱相同內容重播。新嚴格比較正確拒絕，舊寬鬆guard曾掩蓋差異。
+- 防：樣本依正式完成流程標完成，或重播真恢復後的原件；不可刪內容比較來讓測試通過。
+- 證據：ai-gateway r3-usage-replay-20261110/all-initial.log為475過1敗；src/ledger.rs兩樣本補完成標記，ledger-final.log48過、最終all.log539 Rust過。
+
+## 2026-11-10 串流恢復驗收需保留既有CLI的必需旗標
+- 錯：本輪外部runner新增stream-failure選項，只加--check-stream-failure/--check-capture，漏--check-error，CLI在建立runtime前exit2；只有runner先建的空隔離DB，沒有來源請求。
+- 防：組命令前讀完整parser組合條件，補齊必需旗標，在另一隔離庫執行；不放寬parser或重送已開始的來源。
+- guard：既有scripts/verify-client-identity.py的recovery_mode條件會在runtime/來源前拒絕非法組合，原拒絕保留，不改此門檻。
+- 證據：ai-gateway r3-usage-replay-20261110/codex-native-stream-failure-exit.json為2/null-runtime；-r2-exit.json為0，新庫6請求彙總及實際用量見native-summary.json。
+
+## 2026-11-10 執行檔與資料表名稱須沿實際宣告
+- 錯：外部驗收猜bin叫gateway及保存表叫request_captures，分別被build與唯讀SQL拒絕；實際是Cargo.toml的agent-pool-gateway及既有ledger.sql的capture_records。
+- 防：先讀實際target或既有查詢/schema，再組建置與讀回命令；保留前置錯誤，不為猜名失敗重跑已通過Client請求。
+- 證據：ai-gateway r3-usage-replay-20261110/build.log/建置正本build-final.log；讀回只修表名，原四庫重讀驗migration雜湊及owner/tenant/用量，不重送來源。
+
+## 2026-11-10 破壞版對照的後端替身須有合法回傳
+- 錯：P2刪除索引profile比對後，舊固定測試的空Mock先在解包時ValueError，未走到指定拒絕斷言；驗收driver已正確判此對照不成立。
+- 原因：原版會在後端前拒絕，測試只設spy，未給破壞版路徑可用的回傳格式。
+- 防：後端替身回合法空結果，再以DID NOT RAISE或明確不變量失敗確認保護遭移除；不把任意非零退出當偵測成功。
+- 證據：rag P2 negative-Akm01f保留ValueError；test_retrieval.py補return_value=([], False)，targeted-r2一案過，negative-NIGweP指定拒絕斷言失敗被抓到。
+
+## 2026-11-10 SQLite短期限鎖等待要按配置上限判逾時
+- 錯：R2把剩餘80ms向下取整為busy_timeout，SQLITE_BUSY提早不足1ms回來，被分類UPSTREAM_FAILED，未回TIMEOUT。
+- 原因：只比較回來時是否已跨絕對deadline，忽略等待已受剩餘期限約束及毫秒取整。
+- 防：當busy_timeout由剩餘期限限制時，SQLITE_BUSY/SQLITE_LOCKED也歸TIMEOUT；不重試、不寫半張工作。
+- 證據：rag .state/rag-product/R2/jobs-phase2.json原1敗23過；lock-deadline-fixed.json單案過，真兩SQLite連線持鎖、80ms截止及無新增工作/預留均驗。
+
+## 2026-11-10 還原驗收不能把正常歸檔清暫存當資料遺失
+- 錯：R3-S4首次ledger場景以備份前短暫存在的.capture必須還在作判準，入庫後產品正常清除，驗收誤失敗。
+- 防：等待實際背景匯入完成後再取檔案快照；先逐欄核DB密文/非刪紀錄及4方向內容相同，只允許那些已完整入庫的ID暫存消失。非空.conflict與其他待補帳原件仍逐檔核hash/mode，不用筆數代替。
+- 證據：r3-retention-restore-20261110/ledger/archive-file-readback.json、ledger-corrected-storage-replay及ledger-final；src/capture_recovery.rs的remove_archived_spool。
+
+## 2026-11-10 還原全額度驗收不得以空文字額度跳過檢查
+- 錯：原驗收只在已有tokens_per_hour列時比差額，requests-only真舊樣本也能冒完整額度驗收。
+- 防：來源明建文字額度，完成判準硬要求前後非空且實際用量只加一次；以真舊requests-only原件作缺列反例，不把空集合當成功。
+- 證據：r3-retention-restore-20261110/spec-review-final.txt、missing-token-window-final-readback及三final場景。
+
+## 2026-11-10 finally取證失敗不能跳過隔離資源清理
+- 錯：新增finally讀容器log/寫證據若Timeout或OSError，會蓋原錯並跳過清理。
+- 防：取證回傳具體錯誤，由原cleanup_errors統一處理；保留原例外及原資源收尾。3單元故障覆蓋timeout/寫檔/無容器。
+- 證據：r3-retention-restore-20261110/standards-review.txt；scripts/test_capture_restore_validation.py及all.log。
+
+## 2026-11-10 演練命令需保存實際退出碼，不把服務消失推成exit0
+- 錯：初次直接temp-service執行，完成檔/原始資料齊但沒有另收OS退出碼。
+- 防：真退出碼缺失明列NULL，不為補收據重送；後續以父程序保存開始結束/退出碼與執行上限，保留原日誌。
+- 證據：r3-retention-restore-20261110/roundtrip-observation.json；三final-exit.json。
+
+## 2026-11-10 隔離網路建立失敗先分開前置失敗及資料反例
+- 錯：兩Docker場景並行，首個quota反例在network create失敗，原helper沒印stderr，不能算資料檢查抓錯。
+- 防：保留前置失敗、只回收自有物件；同時間可用預設IPv4網段有限，但原因未因stderr缺失而確證。等既有場景自清後序列執行才到資料階段；helper補實際網路stderr，不刪別人網路。
+- 證據：r3-retention-restore-20261110/quota-control-exit.json與quota-control-r2-exit.json/database-restored.json。
+
+## 2026-11-10 推送成功不代表掛鉤重跑了全套
+- 錯：R3-S4沿前輪Rust變更推送經驗預期掛鉤再跑workspace/all；本次僅Python/SQL/文件，實際匹配規則只在Rust等檔案變更時執行，push.log只有遠端回覆。
+- 防：讀實際hook配置/路徑與push.log，分開本輪先前all通過、最後僅字串更動的真資料重放，以及推送exit0；未輸出檢查不能宣稱掛鉤已跑，不為補字面收據重跑未變Rust。
+- 證據：r3-retention-restore-20261110/push-hook-boundary.json、push.log、all.log及三final-readback/缺tokens真舊原件；掛鉤保持啟用。
+
+## 2026-11-10 失敗啟動驗收只查必要指令，不假設所有查詢都走同一關卡
+- 錯：預試驗把 /status、/events、/approvals 都預期為「尚無目前任務」；批准指令先檢查啟動完成狀態，第三項正確顯示等待啟動，導致自有 runner 到期。
+- 防：先核各入口條件；本次需求是啟動失敗後不能把規格檔當任務編號，只驗 /status。原預試驗保留為驗收器假設錯誤，不當成產品缺陷或陰性對照，不放寬批准關卡。
+- 證據：agent .runtime/p04-resume-core/failed-start-baseline/result.json；修正後 failed-start-baseline-r2/result.json 為原固定 CLI 退出0、無任務、未建立資料庫、無模型請求。
+
+## 2026-11-10 改交付project路徑不等於已搬遷既有registry
+- 錯：R3-S3把delivery project從不存在的agent-pool-gateway-completion改為現存ai-gateway-completion，VALIDATING含not_run不觸發交付gate，未察覺registry仍固定舊路徑；S4寫DONE才拒Registered project cannot change。
+- 防：完成狀態以工具實際接受為準；保留本機驗收與被拒原件，標登記BLOCKED，不把未寫入的iteration冒成功。CLI未提供搬遷時不直接改registry/guard、清登記/改假路徑或降交付分類；沿已過本機前置續不相依安全工作，正式發布前仍須受支持搬遷。
+- guard：既有cash_rule_delivery.py plan_for的Registered project cannot change會拒專案漂移；原stage/S02/S06分類不得降。
+- 證據：r3-retention-restore-20261110/delivery-registration-readback.json與summary.json checkpoint_attempt；當時最後真紀錄148，149 DONE未寫。
+
+## 2026-11-10 額度預留後的準備錯誤不能越過持久帳本
+- 錯：quota先提交，profile/翻譯/capture準備用?直接返回，ledger.reserve尚未執行；保存503零來源仍留active136，新正常請求429。
+- 防：先建立既有持久帳本，再做來源/翻譯/保存準備，明確零attempt錯誤failed/actual0沿原finish只結一次；未知已送用量不能當0。ledger.reserve本身容量不足/中斷仍是S5未驗缺口，不冒全故障已解。
+- 證據：ai-gateway r3-preflight-quota-20261110/before-summary.json、兩final-exit.json及逐筆readback.py。
+
+## 2026-11-10 Messages與Responses須核實兩條實際入口
+- 錯：初版只修services/openai，Responses過而Messages仍503後429；後者實際在routes/messages另建quota及capture。
+- 防：先查全部request_quota::admit/capture_request::start/reserve_with_quota呼叫位置，不以某一服務檔代表全協定；保留首個部分修正版實敗，補真正第二入口後用同binary驗兩協定。
+- 證據：r3-preflight-quota-20261110/fixed_claude-exit.json與fixed_codex-exit.json、binary-both.json/兩final結果。
+
+## 2026-11-10 新DB驗收不可沿既有腳本新增輪詢
+- 錯：新quota驗收仿既有40次狀態迴圈，規範明禁反覆DB連線，不分讀寫。
+- 防：一次有界等待後單次讀回完整集合，不連線重試；未完成直接失敗留原件，正常與反例斷言不能放寬。
+- 證據：docs/engineering-standards.md:360–369、r3-preflight-quota-20261110/standards-review.txt、改段兩軸複審及final兩實命令。
+
+## 2026-11-10 純HTTP模式不應假借原Client版本驗收
+- 錯：新純HTTP模式沿共用入口先查Claude2.1.319，現機已2.1.321，尚未runtime或來源就退出。
+- 防：只對新明確HTTP模式不查CLI並標HTTP-only，原Client模式版本與實送門檻不改，不冒原Client驗收。
+- 證據：r3-preflight-quota-20261110/before_claude-exit.json runtimeNULL與before_http_claude實故障；Claude/Codex版本原輸出。
+
+## 2026-11-10 移動準備區塊須保留後續秘密遮蔽資料
+- 錯：將setup移入async區塊，漏返回後續六處用的provider_secret，首編譯E0425失敗。
+- 防：先查完整變數引用，將必要既有遮蔽值帶回原作用域；不刪秘密遮蔽、不中斷持有來源鎖規則來讓編譯過。
+- guard：Rust名稱解析/型別檢查拒未定義變數。
+- 證據：r3-preflight-quota-20261110/build.log、build-both.log及完整all.log。
+
+## 2026-11-10 帳本名額與用量額度是不同狀態，不能把503當未預留證據
+- 錯：quota先提交、帳本SpoolFull才回503；第一筆結帳後第二仍active111，窗口113/限222，第三111被429，容量已空仍不能工作。
+- 防：先以真進行中請求占唯一slot、逐筆比quota request UUID與窗口/結帳。只對明確SpoolFull/DB可寫/有預留，沿既有交易保存failed/final0及回收文字估量，仍回503；保留shared備份鎖與原取消保護。不把Io/DB失敗/取消崩潰冒成已解。
+- 證據：ai-gateway r3-ledger-capacity-20261110/before-summary.json、兩fixed-exit與readback.py。
+
+## 2026-11-10 模型否定真反例時先核數據，不拿建議推翻原件
+- 錯：本機模型把兩個不同request的quota預留說成同一請求內部狀態，把actual2說成已用盡quota222，並混同shared/exclusive鎖，建議no-op。
+- 防：回到原UUID/預留111/實際2/窗口113/上限222及source計數，整份錯誤建議實際grade0/3，保持必要修復與獨立審查，不為模型說法改判準。
+- 證據：r3-ledger-capacity-20261110/design-output.txt、design-decision.json、before-summary.json。
+
+## 2026-11-10 本機模型評分必用輸出中的真run id
+- 錯：未先讀完整首行就猜grade id，被CLI拒no run with id，沒有寫入錯誤評分。
+- 防：先讀已保存輸出首行的完整id，再grade；不從時間/PID猜ID。工具拒絕不等於已評分。
+- guard：localai grade驗run_id必須存在，否則拒絕且不寫評分。
+- 證據：r3-ledger-capacity-20261110/design-output.txt實id20261110-040345-3848418及實際0/3評分。
+
+## 2026-11-10 首筆200和帳本完成不能取代完整串流證據
+- 錯：容量驗收最初只核first200及final/用量，未直接核首筆/恢復回覆是否含完整terminal。
+- 防：保留實際wire sha，與含terminal的來源完整bytes比對；可用已保存hash補驗，不為補收據重送未變來源，並如實分整命令版本與後補判準。
+- 證據：r3-ledger-capacity-20261110/stream-integrity-readback.json、standards-review-fix.txt與兩原runtime capacity-calls.json。
+
+## 2026-11-10 檔案檢查與開啟分開仍會跟隨置換連結
+- 錯：K3對帳先lstat後Path.open，原件在中間被換成連結時，雖回雜湊不符，仍已讀到控制目標。
+- 防：父目錄與basename皆以O_NOFOLLOW開啟，固定目錄fd，再對同一檔案fd核型別/大小/內容；非一般檔不讀。
+- 證據：rag K3 review-3BGH2h/r1-symlink-race.json重現；14案、父目錄/檔案兩破壞版及三獨立fd探針驗修正。
+
+## 2026-11-10 DB補記仍在執行時不可因caller取消提前放備份鎖
+- 錯：SpoolFull補記await由caller持鎖且不在PendingFinalization；真DB鎖等待後abort，pending0/備份可進/關機等待立返，但DB隨後仍成功提交，不能推為已證漏帳。
+- 防：原單次交易獨立async工作持原鎖及既有pending，caller僅detach；DB錯誤工作內記錄且仍等待者原樣收到，先放鎖再通知pending歸零。真舊失敗、新pending1/備份拒/等待完成及PoolClosed釋鎖過；補記前取消/硬退出/DB恢復仍未解，不把函式等待冒整程序退出。
+- 證據：ai-gateway r3-ledger-cancel-20261110/before.log、fixed.log、ledger.log及summary.json。
+
+## 2026-11-10 quota提交前必先有可恢復的初始帳本
+- 錯：只在SpoolFull後DB補記，DB逾時503零新來源後強退，重啟第二預留111無spool/GW，第一未知111使新111在限222被429；普通強退PG仍補記的控制組卻200，不可一概推漏帳。
+- 防：模型/政策前置後先reserve既有持久帳本及備份鎖，再quota交易；同Reservation承接拒絕與metadata。恢復只對零attempt初始新紀錄先12012租戶鎖，另查新快照批次對回真quota並同交易結0；已送未知/已GW/其他已知conflict預留不猜0。真COMMIT等待中強退後啟動等鎖及新快照0/2通過；不是所有DB故障恢復。
+- 證據：ai-gateway r3-ledger-crash-20261110/before-summary.json、native-summary.json、before-unit.log及ledger.log。
+
+## 2026-11-10 SQLx完整prepare會先清快取，普通測試庫不含獨立見證schema
+- 錯：直接拿普通隔離功能庫全量prepare，缺erasure_witness schema/function而失敗，先清了64份既有cache；也抓到搬移時漏ledger_estimated後續引用。
+- 防：先確認編譯庫含主DB及獨立見證所有查詢結構；未齊不盲重跑。此次原cache本輪前乾淨，逐檔由HEAD精確還原，保留真線上產生兩新cache並驗hash；離線build/51帳本/完整通過，不冒完整prepare成功。搬移需查完整引用；Rust名稱檢查仍拒未定義變數，未繞過。
+- 證據：r3-ledger-crash-20261110/sqlx-prepare-repair.json、binary-fixed.json、ledger.log及all.log；guard：既有Rust名稱解析拒E0425，SQLx compile-time schema檢查拒缺表/函式。
+
+## 2026-11-10 並行驗收收據不可讀共用runtime.json猜配
+- 錯：兩native case各自成功，但父程序結束後讀同一runtime.json，Codex收據配到Claude路徑。
+- 防：保留錯原收據，從每命令原stdout首行讀自有runtime，再以相同固定binary SHA及各庫原件讀回；不為修收據重送。helper寫分case檔，runner只讀自有log，readback驗證owner/operation/request/預留/來源用量/capture關聯。
+- 證據：r3-ledger-crash-20261110/fixed-codex-exit-original.json、fixed-codex.log、native-summary.json及readback.py。
+
+## 2026-11-10 交界恢復還須對回已提交估量，actual正確不能代替
+- 錯：先有初始spool後提交quota的恢復已找回reservation/actual0，但GW留原初估24、真quota估111；只核owner/actual的初版驗收未抓。
+- 防：恢復SQL取r.estimated_tokens，除count_tokens原None規則外補回帳本；估量與actual分開，111不是實際用量。新斷言在舊原件真exit1，最後新binary五場景及估量/owner/actual逐筆對回，兩改段複審無；原件與初版皆留，不冒舊驗收曾核此欄。
+- 證據：r3-ledger-crash-20261110/estimate-control-exit.json、native-final-summary.json及estimate-spec-review/standards-review.txt。
+
+## 2026-11-10 長推送hook通過仍可能SIGPIPE，先讀遠端再決定
+- 錯：首次setup PoolTimedOut擋推，單項過；4執行緒原workspace/all全過後Git仍SIGPIPE(-13)，非成功推送。事後DB1client/100不能倒推當時滿。
+- 防：留每次OS退出碼與原log，先查遠端ref實為舊69d，不盲推、不跳hook；保留4測試並行，沿先前已用過的SSH ServerAliveInterval=15/CountMax=3做後續推送。setup timeout與傳送中斷原因均未確證，不能冒已修根因；不可重造runner時漏既有傳輸設定。
+- 證據：r3-ledger-crash-20261110/push-exit.json、push-failure-diagnosis.json、failed-push-target-exit.json、push-serial-exit.json及transport-diagnosis.json。
+
+## 2026-11-10 測試DB名稱須先驗63字元且模型呼叫也要指定實際cwd
+- 錯：少數native fixture DB請求名超63字元，PG自動截斷，回執只寫請求名；早期本機模型從預設trout呼叫，輸入雖為completion實碼但模型repo稽核標trout。
+- 防：後續fixture先縮唯一名稱並assert len<=63，原較長名留CREATE notice之實際截斷，不當成另一DB；model CLI明確cwd=ai-gateway-completion，之前model輸出不當工作樹實作證據，實作/build/test/git一直明確在integration。最後指定27短完整輸入於正確cwd實審，實ID讀回後grade。
+- 證據：r3-ledger-crash-20261110/final-fixed-codex-database.json、run-fixed-native.py及localai now實run紀錄。
+
+## 2026-11-10 寫入者結束不能只靠關檔釋鎖；反例先核完整檔案結構
+- 錯：完整push在finish後recover回Unavailable；保留複製檔案代號的確定控制也讓舊版讀取失敗。最初控制錯把完整spool視為只有一塊，漏了manifest，該次exit不能算產品陰性對照。
+- 防：保留原偶發失敗且不宣稱同因；修正測試塊數為資料加manifest後，真正before_release斷言失敗/丟複製代號後能讀。沿既有備份鎖模式在CaptureSpool Drop明確unlock並記錯，驗寫入中仍拒、完整與未完成退出均能讀；不跳hook或刪鎖驗證。
+- 證據：r3-ledger-crash-20261110/push-final-exit.json、clone-fd-control-before.log、clone-fd-fixed.log、lease-diagnosis.json；最終全套另列，早期錯測/原始原件皆留。
+
+## 2026-11-10 新驗收版本換標籤不可廣替final檔名；名稱長度先算完再執行
+- 錯：新增lease場景時fallback DB前綴仍太長，兩次被長度assert擋在CREATE前；讀回草稿廣替final-又誤將fixture final-state.json改成不存在的lease-state.json。
+- 防：用固定既有validation前綴，先機械算全部五個label長度55/56/62/58/59，再執行唯一尚未開始的COMMIT案。讀回只替五個精確label及binary/輸出摘要名稱，fixture名稱不改；對既有原件修讀回不重送模型請求。兩錯屬驗收前置，不當產品陰性對照。
+- guard：run-fixed-native.py既有assert len(name)<=63拒兩次超長名，皆在CREATE/服務/來源請求之前；保留不繞過。讀回仍以既有檔名及逐欄assert驗，沒有冒讀回錯是產品失敗。
+- 證據：r3-ledger-crash-20261110/lease-commit-precondition-failure.json、lease-readback-precondition-failure.json及native-lease-summary.json。
+
+## 2026-11-10 未取得的單實例鎖不能照樣監看；健康重試不能當啟動等待
+- 錯：直接轉送本來不取single-instance鎖，startup卻一律監看，真兩協定啟動1秒自行退出。一般排隊DB停止會真失鎖、30秒drain截流，兩者原因及安全語意不同，不能混稱保存失敗或關掉單實例保護。
+- 防：監看條件與取得條件一致，只修passthrough分支；保留一般模式/停止訊號及已知長流缺口。最後新測試對HEAD原startup真失敗，再恢復兩行修正跑正對照；舊方法及兩協定真失敗不刪。測試改等本機啟動日誌，只在必要時點各查一次health，不把健康/pg_isready包迴圈；自有PG等單次docker logs PID1 ready事件。初6秒PG仍starting只是前置失敗，無來源；ready帳本要按原實碼剝尾端NUL，不能當普通JSON。
+- 證據：r3-accepted-db-outage-20261110 的normal-mode-failures、passthrough-before-failures、initial-setup-failure-summary、before-unit-final及fixed-unit-final；正式模式只讀，不改正式設定。後續全套及native終局另記。
+
+## 2026-11-10 長流比對要保留固定保活，後補掃描不能抹掉原退出碼
+- 錯：DB斷線37秒的第一版驗收要求來源/Client raw全部相同，未沿既有validate_passthrough_stream只排固定保活frame；舊失敗wire未留，不能倒推當次一定僅保活。兩個最終流程已過第二重啟快照，卻在最後runpy載入client_capture_access時找不到同目錄module而exit1。
+- 防：來源raw及Client raw先各存原件，Provider保存等來源、Client保存等實收，各raw SHA分列；只重用原固定保活規則，其餘comment/terminal都不放寬。原兩命令exit1留，缺掃描只啟原自有PG/原件補，不重送HTTP；原件讀回2過/10破壞拒。新case在啟容器前import必要module，機械擋相同漏載，另先留functional milestone並禁覆寫既有版本。獨立checker只覆驗response4/協定，request4已原執行比不冒後補全8。
+- 證據：r3-accepted-db-outage-20261110 的r4/r5各source snapshot/exit、raw wire、completed-result/scan-exit、import-preflight與readback-final-exits。原動態secret未留，後補完整aigw raw/hex格式及已知markers，範圍如實列。
+
+## 2026-11-10 補掃描成功收據須等所有輸出落檔
+- 錯：finish-scan先把result_record設為dict，若後續寫檔失敗，finally可能寫exit0；獨立需求審查抓到，實際這次兩輸出均已存在，沒有走該故障分支。
+- 防：獨立completed旗標只在兩輸出均寫完後true；原已執行版本另存。獨立checker強制讀後補快照，與原final/第二重啟完全相等，不能只憑exit0。只重跑新checker的原件/破壞對照，不重掃PG或送模型；改段複審無。
+- 證據：r3-accepted-db-outage-20261110/finish-scan-executed.py、finish-scan.py、兩post-scan-state、readback-final-exits及需求改段複審。
+
+## 2026-11-10 Git清單非ASCII路徑須用NUL分隔，不可把C式引號當真路徑
+- 錯：新盤點git ls-files未加-z，兩份中文PDF被C式引用；Path.is_file把帶引號/八進位字串當檔名而漏列。收尾assert抓本輪清單199份未變與前輪201不符，初以未列PDF補核，不可當檔案已忽略或刪除。
+- 防：改單次git ls-files -z再os.fsdecode，各206實名完整列出；初204基線不偽改，額外兩PDF用前輪SHA與現檔相等補證，五規劃外201實未變。原清單及初診斷保留，摘要明列git列199加Unicode兩份，不能猜數或把有引號路徑直接讀。
+- 證據：r3-accepted-db-outage-20261110/primary-before.json、primary-preservation-listing-initial.json、primary-preservation-current.json及summary.json。
+
+## 2026-11-10 停機完成時間不能當失鎖開始時間
+- 錯：一般排隊恢復驗收從docker stop返回後起算30秒，誤拒已在命令執行中開始關機的27.29秒樣本。
+- 防：記停機命令開始及完成兩點，核實際失鎖及drain_timeout_ms；不改產品期限配合測試，原退出碼及樣本保留。
+- 證據：r3-queued-db-recovery-20261110/v1-clock-criterion-failure.json、v2/codex-result.json及v3/claude-result.json。
+
+## 2026-11-10 串流部分回報不是最終結帳用量
+- 錯：Claude中斷驗收一律禁止provider_reported，誤拒message_start已報input1/output0、但quota actual仍null的正確未知狀態。
+- 防：逐協定驗實際事件；部分輸入保留、最終輸出仍未知，不把部分1或attempt預設零當最終用量。舊預留active且無結帳，新完整請求才結一次；原錯判保存，已過Codex不重送。
+- 證據：r3-queued-db-recovery-20261110/v2/claude-diagnostic-envelope.json、v2-partial-usage-criterion-failure.json及v3/claude-result.json。
+
+## 2026-11-10 陰性對照須能單獨識別目標檢查
+- 錯：未保存Client資料的反例附任意frame，被來源內容前綴檢查先拒，不能證已收必已保存的檢查有效。
+- 防：改用同一真來源下一完整frame，其他關係維持正確；原checker必拒，只刪目標assert的故意破壞checker須誤收同一反例。只改記憶體副本，不改原件、產品或再送HTTP。
+- 證據：r3-queued-db-recovery-20261110/negative-specificity.json、verify.py及verify-without-client-persist-control.py。
+
+## 2026-11-10 反例前的來源副本先復用既有完整路徑快照
+- 錯：另存反例前來源時只建了測試檔的父目錄，第二個來源檔的父目錄缺漏，準備操作得到ENOENT；原碼沒有被改。
+- 防：先找已核雜湊的固定來源副本；需新增副本時逐檔建dirname並以wx保存，不能重跑覆蓋已存在副本。準備未完成不進入相依來源修改。
+- 證據：agent .runtime/p04-resume-core/failed-start-regression/before.json 改參照triage-before-all-terminal/source內既有副本；後續使用既有變異工具自動還原，validation.json已核產品原碼雜湊一致。
+
+## 2026-11-10 保存背景匯入的觀察時間須對齊真排程
+- 錯：660秒串流完成後只等3秒就驗capture rows，遇上30秒maintenance剛在結束前跑過，0筆被錯當保存失敗，原runner exit1。
+- 防：以啟動匯入/實際本機事件為準，不拿固定短睡眠代完成條件；保留0筆原快照與失敗退出碼。同PG同版啟動後2份完整內容匯入、9類帳本表不變即可補證，不重送已完成長流。
+- 證據：r3-backup-long-stream-20261110/source-gateway-ended.log、source-state.json、finish-v2/recovered-source-state.json及ledger-after-recovery.json。
+
+## 2026-11-10 階段補驗先核成功狀態與原fixture的網路轉換
+- 錯：補驗把真登入201寫成200而exit1；後續將none隔離PG直接attach內網又exit1。原成功HTTP和已還原資料不能因此重送或重做。
+- 防：先讀實路由的StatusCode及原fixture停舊PG/同PGDATA另起內網PG的步驟。記status再assert；短期測試登入需預先安排可續跑，若另種有期fixture登入，明列原登入未復原，不能冒原Client驗收。只按exactCID/owner操作自有PG，舊容器/卷/退出碼保留。
+- 證據：r3-backup-long-stream-20261110/continuation-os-exit.json、finish-v2/continuation-os-exit.json、login-status.json及finish-readback/restarted-database.json、os-exit.json。
+
+## 2026-11-10 還原相等不能取代額度對帳；基準失敗時破壞對照不計過
+- 錯：初runner只核兩筆actual各2及還原快照相等，漏窗口應4；原件checker補窗口後抓到148。其他11個變造都exit1，但原件已exit1，不能當有效拒絕證明。
+- 防：帳本、預留、事件、來源用量及窗口分別核對，再驗還原相等；先要求正常原件通過才計破壞對照。本輪148多占144仍是產品失敗，不把相等錯帳或備份成功當帳務通過。真PG函數有未加總deltas的UPDATE FROM，僅列有官方依據的原因候選；原同批payload未留，先短實碼反例確證，不冒根因已修。
+- 證據：r3-backup-long-stream-20261110/accounting-failure.json、readback-normal.log、readback-exits.json及actual-ingest-routines.json。
+
+## 2026-11-10 測試依賴須查到實際crate，不能以鄰近CLI有套件推定
+- 錯：新增agent核心整合測試使用CLI已有的tempfile，但agent crate沒有該依賴，編譯E0433，尚未跑到規格核對。
+- 防：先讀目標Cargo.toml與現有測試；本次沿既有std暫存路徑及uuid建隔離資料夾，不新增依賴。保留前置錯誤，只以真正執行具名斷言的失敗作陰性對照。
+- 證據：agent .runtime/p04-resume-core/resume-spec-regression/preparation-compile-error.txt、positive-r2.txt、validation.json。
+
+## 2026-11-10 同repo的Rust命令須串行通過共用快取檢查
+- 錯：完成來源還原後，同批並行跑test及fmt，fmt被快取稽核鎖以Errno11拒絕，並非程式格式錯誤。
+- 防：同repo的Rust命令串行；確認原test已終局後單獨跑fmt，不繞過快取檢查或另建target。
+- 證據：agent resume-spec回歸，restored-positive.txt退出0，後續串行fmt退出0；原拒絕在工具紀錄保留。
+
+## 2026-11-10 跨套件變異反例須先核正常基準會選哪個套件
+- 錯：核心程式的反例指定CLI測試；設定測試套件或工作區仍未改工具27.1.0的正常基準選擇，兩次退出4，沒有執行變異。
+- 防：先讀官方同版本的基準實作與實際命令；正常基準只選被改套件，須讓每次呼叫也包含CLI套件。先以兩套件原碼測試驗參數，再執行，保留正常基準，不跳過或放寬。
+- 證據：agent .runtime/p04-resume-core/resume-mixed-regression/ 的前兩次前置失敗、cross-package-positive.txt、focused-mutation-r3及r4；兩種改錯均編譯成功後具名失敗101，原碼還原。
+
+## 2026-11-10 同批額度必須先依完整視窗鍵加總；負向退出碼要核失敗原因
+- 錯：底層UPDATE FROM直接接每筆預留delta，兩筆同window只套一筆；真批次119/146各結2算出148而應4。最初新fixture的quota_decision誤作JSON字串，23514/exit101不能冒這個產品反例。
+- 防：以tenant/quota/limit/window起算時間group，再同時sum用量與成本；外層鎖、重播/衝突交易保留，另加forward migration不改舊檔或歷史原件。陰性核實錯誤文字expected4 observed148；最終同SQL舊schema exit3/新migration exit0。測試加同tenant未使用quota37與不同調整量視窗，防對稱資料掩蓋串錯；歷史148仍須另驗隔離恢復，不以新入帳修正冒歷史已修。
+- 證據：r3-quota-batch-20261110/before.log、before-corrected.log、sql-control-summary.json、after-isolation-exit.json及final-check-summary.json；tests/quota_batch_reconciliation.sql已納既有workspace/all掛鉤，型別極值僅靜態確認，未冒實測。
+
+## 2026-11-10 停止新入口不可改既有run取消退出碼
+- 錯：為新cancel命令的未確認結果改既有run取消退出1，原回執繁忙取消案例抓到預期130實際1。
+- 防：run保留130及實際outcome_unknown狀態，只修不當已停止文字；新cancel的未確認回1，既有斷言不放寬。
+- 證據：agent p04-cross-cancel-20261110/gate-r4.txt；後續來源與gate-r6。
+
+## 2026-11-10 舊版升級反例先沿原資料限制建立隔離來源
+- 錯：新v6 fixture先填generation0被既有CHECK拒；改正後破壞外鍵又被準備連線的外鍵檢查提前拒，尚未驗到產品升級回復。
+- 防：沿原SQL及正整數世代，準備連線明確關外鍵才注入壞關聯；產品連線仍檢外鍵且整筆回復，保留初錯誤不當產品陰性。
+- 證據：agent p04-cross-cancel-20261110/migration-positive三版及preparation-errors.json。
+
+## 2026-11-10 還原工具的Docker子容器須同時盤點run與create
+- 錯：外層只追自建容器，未含原restore helper；補代理只攔run，漏掉先create再start的pg_restore preflight。21個run確有本輪owner/CPU/mem，不能擴稱全部helper都補齊。
+- 防：查原工具完整run/create/start/rm路徑。CLI代理同時處理run/create且保留原語意，對create以無資料探針實inspect驗owner/1CPU/較嚴256MiB；原執行版另留，後補探針不回填native。正常原preflight沿自身256MiB/pids32/expire已清理，另實查其label無存活，主容器與卷保留；不能泛稱全部只停不刪。新網路create失敗時先核狀態，不盲建或刪全域網路；本輪借原同任務internal空端點網路。原stderr未留，32個網路不是地址池原因已證。
+- 證據：r3-historical-quota-20261110/network-diagnosis.json、v2/bin/docker.executed、v2/bin/docker、v2/helper-runs.jsonl、v2/create-helper-readback.json及preservation-readback.json。本輪docker例外已補stderr落檔，未宣稱全域hook已變更。
+
+## 2026-11-10 改資料版本後先搜全部舊數值，再驗升級組
+- 錯：升7只搜version旁固定6，漏if fail分支的v2與v3成功期望6，完整快檢先後被舊斷言擋下。
+- 防：搜尋目標測試所有舊數值，逐條區分大小常數、舊輸入、回復版本與最新成功版本；只改最新成功期望，再先驗upgrade具名組，保留資料與回復斷言，不反覆整套找下一個舊值。
+- guard: 專案gate的升級測試已機械擋這些舊期望，不跳過；本次另沿完整舊值搜尋作前置。
+- 證據：agent p04-cross-cancel-20261110/gate-r5、gate-r6、legacy-upgrades-positive.txt。
+
+## 2026-11-10 備份中斷fixture須先對齊來源信任與完整容器ID
+- 錯：新provider的key/base_url與固定Gateway受信任profile不同，啟用400；續段僅等cidfile存在就讀，Docker剛建空檔時inspect空ID造成exit1，兩次均未到目標強退場景。
+- 防：建立fixture前先查profile精確key/type/base_url/ref比對，沿固定binary的新隔離Gateway明確配profile；續用已配置fixture不重送原對話。cidfile須等非空64hex且inspect Running/READY，採15秒有界狀態觀察，連線錯誤立即停。保留原OS1，不將準備錯誤當產品陰性。
+- 證據：r3-backup-kill-20261110根及v2/os-exit.json、v2/docker-failure-7a7e089e49be47118f5f0a5bbd69f3e5.json；v3真kill -9、自然釋鎖及restore exit0。
+
+## 2026-11-10 cash-rule-checkpoint 包裝程式在 uv 0.12 驗證器找不到 jsonschema
+- 錯：`~/tools/cash-rule-checkpoint` 用 `uv run --with-requirements ... python3`，驗證子程序用 sys.executable 啟動，拿不到暫時環境的套件，報 ModuleNotFoundError，沒寫入。
+- 防：用 `uv venv` 建持久環境並 `uv pip install -r ~/.claude/skills/cash-rule/scripts/requirements.txt`，再以該環境 python 直接跑 `~/tools/cash_rule_checkpoint.py`；第一筆必須 PLANNED/READY。
+- 證據：sticky-header-gap-3711 loop，scratchpad/ckvenv 寫入 4 筆成功。
+
+## 2026-11-10 pnpm 9.15.4 工具快取被掏空導致所有 pnpm 指令失敗
+- 錯：`~/.local/share/pnpm/store/v11/links/@/pnpm/9.15.4/.../bin` 為空（09:05 被清掉檔案），pnpm 11 依 packageManager 切換失敗。刪該目錄被權限拒絕。
+- 防：用 `npm i pnpm@9.15.4 --prefix <暫存>` 取得 pnpm 9，`PATH=<暫存>/node_modules/.bin:$PATH` 並加 `--store-dir <暫存>/store` 安裝；新 worktree 要先 `prisma generate` 再推送，否則 pre-push tsc 報 UserRole 等缺漏。
+- 證據：crossec-3711 push 通過 pre-push 72s。

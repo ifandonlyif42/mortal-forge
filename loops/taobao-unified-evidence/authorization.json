@@ -1,0 +1,18 @@
+{
+  "authorized": true,
+  "project": "/home/cash/work_space/private/mortal-forge",
+  "environment": "local",
+  "artifact_sha256": "0ea4a6b8e2c91dd7a5f1655d1eba2cf74692003add950deb9c117d750e69849a",
+  "deploy": {
+    "path": "/home/cash/work_space/private/mortal-forge/loops/taobao-unified-evidence/deploy.py",
+    "sha256": "29293b1adf055e0305984c027ace4a6f2fadef0b35caa5c2459ea9036d6ca1b3"
+  },
+  "readback": {
+    "path": "/home/cash/work_space/private/mortal-forge/loops/taobao-unified-evidence/readback.py",
+    "sha256": "9723634bec0c1166aa9bc15f5e35e1c84779352cf29eaef39dcea68dd5fd165d"
+  },
+  "source": {
+    "path": "/home/cash/work_space/private/mortal-forge/loops/taobao-unified-evidence/authorization-source.txt",
+    "sha256": "226bd6e128142b5032cf9f282e06acf44bbc512c155f0b43666b20040e9f7051"
+  }
+}

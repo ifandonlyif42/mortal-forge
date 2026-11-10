@@ -1,0 +1,83 @@
+{
+  "live_products": [
+    {
+      "status": "product",
+      "login": "logged_in",
+      "source_url": "https://item.taobao.com/item.htm?id=1081312377145&skuId=6300910807066",
+      "title": "deepseek深度学习主机v100 32G/64G显卡服务器GPU工作站本地部署",
+      "selected_options": [
+        "【64显存】V100 32g*2张 升级水冷 整机质保一年 多人加购"
+      ],
+      "price_text": "店铺优惠后 ￥ 14599",
+      "price_status": "visible_page_sku_unverified",
+      "parameters": [
+        "1年 质保期",
+        "NVIDIA/英伟达 GPU品牌",
+        "品牌 GEFORCE/英伟达",
+        "型号 Tesla V100 32G"
+      ],
+      "warranty": "1年 质保期",
+      "observed_at": "2026-11-04T16:07:21.480Z"
+    },
+    {
+      "status": "product",
+      "login": "logged_in",
+      "source_url": "https://item.taobao.com/item.htm?id=1075959665126&skuId=6126359180773",
+      "title": "双V100 32G显卡V100 64G显卡双卡显卡坞扩展坞NVLink水冷PLX双X16",
+      "selected_options": [
+        "【64G】双卡240水冷V100 32G nvlink扩展坞自带plx双x16 多人加购"
+      ],
+      "price_text": "店铺优惠后 ￥ 15999",
+      "price_status": "visible_page_sku_unverified",
+      "parameters": [
+        "1年 质保期",
+        "NVIDIA/英伟达 GPU品牌",
+        "品牌 NVIDIA Quadro",
+        "型号 V100 16G*2（扩展卡）",
+        "上市时间 2026-08-17",
+        "显卡交火支持 是",
+        "生产企业 性价比款"
+      ],
+      "warranty": "1年 质保期",
+      "observed_at": "2026-11-04T16:07:38.114Z"
+    }
+  ],
+  "browser_fixtures": {
+    "passed": 15,
+    "checks": [
+      "我的淘寶連結不誤判成已登入",
+      "商品標題優先於評價標題",
+      "保留所選款式",
+      "價格及保固讀回",
+      "圖片去重及分頁",
+      "圖片續頁不重複",
+      "評價不帶帳戶姓名",
+      "頁面價格不假稱已證明對應款式",
+      "登入表單優先且不輸出帳戶",
+      "驗證與登出分開",
+      "已登入與未知價格分開",
+      "搜尋去重與保留款式、去除追蹤參數",
+      "京東商品讀取",
+      "款式縮圖不被排除",
+      "圖片達上限明確回報截斷"
+    ],
+    "network": "所有測試請求均由本機攔截，不送網站、不登入"
+  },
+  "negative_control": {
+    "error": "### Error\nError: 我的淘寶連結不誤判成已登入"
+  },
+  "live_search": {
+    "status": "verification_required",
+    "login": "verification_required",
+    "observed_at": "2026-11-04T16:03:40.785Z"
+  },
+  "review": "獨立審查四項問題已修正，複審無新增缺陷；審查者未自行重跑瀏覽器測試",
+  "not_verified": [
+    "京東真人登入及真商品",
+    "淘寶搜尋通過人工驗證後的實際結果",
+    "未載入評價",
+    "圖片自動OCR",
+    "自動確認價格已對應完整款式"
+  ],
+  "deployment": "只有本機共用技能；沿用既有Playwright MCP；未購買或傳訊息"
+}

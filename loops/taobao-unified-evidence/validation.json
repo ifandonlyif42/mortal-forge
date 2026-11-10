@@ -1,0 +1,29 @@
+{
+  "version_sha256": "0ea4a6b8e2c91dd7a5f1655d1eba2cf74692003add950deb9c117d750e69849a",
+  "checks": [
+    {
+      "name": "Node負向測試3項",
+      "result": "pass"
+    },
+    {
+      "name": "本機瀏覽器DOM15項",
+      "result": "pass"
+    },
+    {
+      "name": "登入判斷變異負向對照",
+      "result": "pass"
+    },
+    {
+      "name": "真淘寶兩商品讀回",
+      "result": "pass"
+    },
+    {
+      "name": "語法與技能格式檢查",
+      "result": "pass"
+    },
+    {
+      "name": "獨立審查修正後複審",
+      "result": "pass"
+    }
+  ]
+}
