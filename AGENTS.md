@@ -48,3 +48,30 @@
 ## 共通 Gitflow 規範
 
 新工作遵守 [DEVELOPMENT.md](DEVELOPMENT.md)，使用 `develop` 與 `feature/`、`bug/`、`release/`、`hotfix/`。既有架構、安全、資料與驗收約束繼續有效。執行 `.repo-policy/install.py` 安裝可復原的 hooks；不得繞過失敗 gate。
+
+## 檔案放哪裡
+
+- 建檔或建資料夾前先看下表。地圖沒寫的位置不要自己發明，先沿用同類檔案現在的位置。
+- 暫存檔、試跑輸出與審查收據放 `artifacts/`（已被 .gitignore 排除），不放根目錄。
+- 新增根目錄項目、模組或改依賴方向時，同一次修改更新這份地圖，交付時列出原因。不開 `utils`、`common`、`misc`、`temp` 這類看不出職責的資料夾。
+- commit 時 `~/.agents/guards/git_guard.py` 會擋下地圖沒寫的根目錄新增項目，以及上述名稱的新資料夾。
+
+| 根目錄資料夾 | 放什麼 |
+|---|---|
+| `.agents/` | 本 repo 專用的 mortal-mcp、mortal-tools 技能入口（相容用） |
+| `.claude-plugin/` | Claude Code 外掛市集的清單 |
+| `.cursor/` | Cursor 的規則檔，只指向 AGENTS.md |
+| `.github/` | GitHub Copilot 說明與工作流程 |
+| `.repo-policy/` | 共通 Gitflow 的 hook 安裝與檢查程式 |
+| `.windsurf/` | Windsurf 的規則檔，只指向 AGENTS.md |
+| `agents/` | 全機共用規則、守門腳本、教訓紀錄與共用技能（`~/.agents` 連到這裡） |
+| `bin/` | 套件的命令列入口 |
+| `config/` | 設定範例 |
+| `docs/` | 規劃、目標與交付說明文件 |
+| `loops/` | 長任務的 LOOP 文件、檢查點與交付證據 |
+| `plugins/` | 可安裝的外掛，目前是 memory-tidy |
+| `scripts/` | 安裝與冒煙測試腳本 |
+| `skills/` | 可安裝的標準技能 |
+| `src/` | MCP 服務的 Rust 原始碼 |
+| `test/` | 套件安裝與打包的 Node 測試 |
+| `tools/` | 跨專案共用工具程式與清單（`~/tools` 連到這裡） |
